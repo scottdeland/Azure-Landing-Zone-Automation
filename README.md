@@ -1,1 +1,1 @@
-# Azure-Landing-Zone-Automation
+# TODO: Rewrite the reaadme for the whole repo
