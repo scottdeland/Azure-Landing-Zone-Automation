@@ -9,6 +9,9 @@ on:
       working-directory:
         required: true
         type: string
+      environment:
+        required: true
+        type: string
 
 env:
   TF_VAR_GITHUB_PAT: ${{ secrets.GHRUNNER_PAT }}
@@ -22,6 +25,7 @@ jobs:
   terraform-plan:
     name: 'Terraform Plan'
     runs-on: self-hosted
+    environment: ${{ inputs.environment }}
     defaults:
       run:
         working-directory: ${{ inputs.working-directory }}
@@ -62,7 +66,7 @@ jobs:
     name: 'Terraform Apply'
     if: github.ref == 'refs/heads/master'
     runs-on: self-hosted
-    environment: production
+    environment: ${{ inputs.environment }}
     defaults:
       run:
         working-directory: ${{ inputs.working-directory }}
