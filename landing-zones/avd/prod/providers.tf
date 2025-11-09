@@ -16,9 +16,9 @@ terraform {
   backend "azurerm" {
     subscription_id      = "TBD"
     resource_group_name  = "rg-github-actions-runner"
-    storage_account_name = "saghrunner"
+    storage_account_name = "saprodghrunner"
     container_name       = "solutions"
-    key                  = "solution-ai-lz.tfstate"
+    key                  = "solution-avd-lz-prod.tfstate"
   }
 }
 

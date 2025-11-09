@@ -14,15 +14,15 @@ terraform {
     }
   }
   backend "azurerm" {
-    subscription_id      = "TBD"
+    subscription_id      = "ab66f873-5466-4456-a693-780c6c173733"
     resource_group_name  = "rg-github-actions-runner"
-    storage_account_name = "saghrunner"
+    storage_account_name = "sadevghrunner"
     container_name       = "solutions"
-    key                  = "solution-palo-alto-lz.tfstate"
+    key                  = "solution-base-lz-dev.tfstate"
   }
 }
 
 provider "azurerm" {
   features {}
-  subscription_id = "TBD"
+  subscription_id = "ab66f873-5466-4456-a693-780c6c173733"
 }
