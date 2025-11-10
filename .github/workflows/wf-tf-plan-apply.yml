@@ -1,0 +1,107 @@
+name: 'Terraform Plan/Apply'
+
+on:
+  workflow_call:
+    inputs:
+      workload-directory:
+        required: true
+        type: string
+      working-directory:
+        required: true
+        type: string
+      environment:
+        required: true
+        type: string
+
+env:
+  TF_VAR_GITHUB_PAT: ${{ secrets.GHRUNNER_PAT }}
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  terraform-plan:
+    name: 'Terraform Plan'
+    runs-on: self-hosted
+    environment: ${{ inputs.environment }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    env:
+      ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+      ACTIONS_STEP_DEBUG: true
+      TF_VAR_sa_key: ${{ secrets.SA_PASSWORD }}
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Log in to Azure using OIDC
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}          
+          allow-no-subscriptions: true
+          audience: 'api://AzureADTokenExchange'
+      
+      - name: Terraform Init
+        id: init
+        run: terraform init -backend-config="key=solution-${{ inputs.workload-directory }}-lz.tfstate"
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+          terraform plan \
+            -var-file="solutions/${{ inputs.workload-directory }}/terraform.tfvars" \
+            -no-color \
+            -out tfplan
+    
+      - name: Publish Terraform Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: tfplan
+
+  terraform-apply:
+    name: 'Terraform Apply'
+    if: github.ref == 'refs/heads/master'
+    runs-on: self-hosted
+    environment: ${{ inputs.environment }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    needs: [terraform-plan]
+    env:
+      ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+      ACTIONS_STEP_DEBUG: true
+      TF_VAR_domain_fqdn: ${{ secrets.DOMAIN_FQDN }}
+      TF_VAR_domain_join_OU: ${{ secrets.DOMAIN_JOIN_OU }}
+      TF_VAR_domain_join_password: ${{ secrets.DOMAIN_JOIN_PASSWORD }}
+      TF_VAR_domain_join_user: ${{ secrets.DOMAIN_JOIN_USER }}
+      TF_VAR_local_admin_username: ${{ secrets.LOCAL_ADMIN_USERNAME }}
+      TF_VAR_local_admin_password: ${{ secrets.LOCAL_ADMIN_PASSWORD }}
+      TF_VAR_sa_key: ${{ secrets.SA_PASSWORD }}
+
+    steps:
+      - uses: actions/checkout@v4
+            
+      - name: Log in to Azure using OIDC
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}         
+          environment: 'AzureCloud'
+          allow-no-subscriptions: true
+          audience: 'api://AzureADTokenExchange'
+    
+      - name: Terraform Init
+        id: init
+        run: terraform init -backend-config="key=solution-${{ inputs.workload-directory}}-lz.tfstate"
+
+      - name: Download Terraform Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+          path: .
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve tfplan
