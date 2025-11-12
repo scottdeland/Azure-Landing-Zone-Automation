@@ -111,6 +111,28 @@ if (-not $servicePrincipal) {
     $servicePrincipal = New-AzADServicePrincipal -ApplicationId $application.AppId
 }
 
+# Ensure the service principal has Contributor on the target subscription
+try {
+    if (-not $SubscriptionId) {
+        $SubscriptionId = (Get-AzContext).Subscription.Id
+    }
+
+    $scope = "/subscriptions/$SubscriptionId"
+
+    $existingAssignment = Get-AzRoleAssignment -ObjectId $servicePrincipal.Id -Scope $scope -RoleDefinitionName "Contributor" -ErrorAction SilentlyContinue
+    if (-not $existingAssignment) {
+        Write-Host "Assigning 'Contributor' role to the service principal at scope $scope..." -ForegroundColor Cyan
+        New-AzRoleAssignment -ObjectId $servicePrincipal.Id -Scope $scope -RoleDefinitionName "Contributor" | Out-Null
+        Write-Host "Contributor role assignment created." -ForegroundColor Green
+    }
+    else {
+        Write-Host "'Contributor' role already assigned at scope $scope." -ForegroundColor Yellow
+    }
+}
+catch {
+    Write-Warning ("Failed to ensure 'Contributor' role assignment: {0}" -f $_.Exception.Message)
+}
+
 $subject = if ($GitHubEnvironment) {
     "repo:$GitHubOrganization/$GitHubRepository:environment:$GitHubEnvironment"
 }
