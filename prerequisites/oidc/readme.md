@@ -9,9 +9,8 @@ What the script does:
   - Issuer: `https://token.actions.githubusercontent.com`
   - Audience: `api://AzureADTokenExchange`
   - Subject: based on repository + branch or repository + environment.
+- Ensures the Service Principal has the `Contributor` role at the specified subscription scope (idempotent). If you lack permissions, the script logs a warning and continues.
 - Optionally creates/rotates a client secret and prints the exact `AZURE_CREDENTIALS` JSON to copy into your GitHub repository secret. It first attempts Azure CLI and, if unavailable or unsuccessful, falls back to Microsoft Graph `addPassword`. This allows you to keep using the workflow input `creds: ${{ secrets.AZURE_CREDENTIALS }}`.
-
-> Note: The script does not assign Azure roles. Ensure the Service Principal has the required role assignments at the subscription or resource group scope for your Terraform operations.
 
 ## Prerequisites
 
@@ -25,6 +24,7 @@ What the script does:
   Get-Module Az.Accounts -ListAvailable | Select-Object Name,Version | Sort-Object Version -Descending | Select-Object -First 1
   ```
 - Azure login with permissions to register applications and create service principals in Entra ID, and to read the target subscription.
+- Role assignment permissions on the target subscription (Owner or User Access Administrator) if you want the script to successfully assign `Contributor` to the Service Principal.
 - Azure CLI (`az`) installed and logged in if you want the script to automatically create/rotate the client secret. If `az` is not available or fails, the script falls back to Microsoft Graph `addPassword`.
 - (Optional) GitHub CLI (`gh`) if you want a convenience command to set the secret from your terminal.
 
@@ -71,6 +71,7 @@ Alternatively, pass `-TenantId` and `-SubscriptionId` to the script; it will con
 - Entra ID Application with display name you specify (creates if missing).
 - Service Principal for the application (creates if missing).
 - Federated Identity Credential bound to your GitHub repo branch or environment.
+- A `Contributor` role assignment for the Service Principal at the subscription scope (if not already present).
 - Optionally, a client secret credential for the application (via Azure CLI) and the `AZURE_CREDENTIALS` JSON.
 
 ## Usage Examples
@@ -132,7 +133,7 @@ gh secret set AZURE_CREDENTIALS --repo <org>/<repo> --body '{"clientId":"<GUID>"
   ```
 
 - Later, you can switch to pure OIDC (no client secret) by changing the workflow to use `client-id`, `tenant-id`, and `subscription-id` inputs and removing `creds`.
-- Ensure the Service Principal has the necessary role assignments for Terraform actions.
+- The script now attempts to ensure the Service Principal has `Contributor` on the subscription; if it cannot (insufficient rights), assign roles manually.
 
 ## Troubleshooting
 
@@ -144,3 +145,12 @@ gh secret set AZURE_CREDENTIALS --repo <org>/<repo> --body '{"clientId":"<GUID>"
 - Error when listing federated credentials or patching/creating them:
   - Ensure your context/permissions allow Microsoft Graph application reads/writes.
   - Re-run after `Connect-AzAccount -Tenant <tenantId> -Subscription <subscriptionId>`.
+ - Warning: `Failed to ensure 'Contributor' role assignment: ...`
+   - Your account likely lacks subscription-level permissions (Owner/User Access Administrator). Either rerun with sufficient rights or assign the role manually:
+     ```bash
+     az role assignment create \
+       --assignee-object-id <sp-object-id> \
+       --assignee-principal-type ServicePrincipal \
+       --role Contributor \
+       --scope /subscriptions/<subscription-id>
+     ```
