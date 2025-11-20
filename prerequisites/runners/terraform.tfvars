@@ -1,4 +1,4 @@
-location          = "usgovvirginia"
+location          = "useast2"
 azure_environment = "public" # or "usgovernment"
 
 # Github Configuration
@@ -11,4 +11,4 @@ runner_name              = "azuredevrunner"
 subnet_name              = "default2"
 vnet_resource_group_name = "testvnet"
 virtual_network_name     = "testvnet"
-container_image          = "ghcr.io/coretek/cicd-docker-images/github-runner:latest"
+container_image          = "ghcr.io/scottdeland/docker-images/gh-runner:latest"
