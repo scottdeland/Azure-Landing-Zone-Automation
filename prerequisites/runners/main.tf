@@ -1,9 +1,29 @@
 locals {
   create_network = (
-    coalesce(trimspace(tostring(var.virtual_network_name)), "") == "" ||
-    coalesce(trimspace(tostring(var.subnet_name)), "") == "" ||
-    coalesce(trimspace(tostring(var.vnet_resource_group_name)), "") == ""
+    var.virtual_network_name == null || trimspace(var.virtual_network_name) == "" ||
+    var.subnet_name == null || trimspace(var.subnet_name) == "" ||
+    var.vnet_resource_group_name == null || trimspace(var.vnet_resource_group_name) == ""
   )
+}
+
+module "naming" {
+  source = "../../modules/terraform-azurerm-naming"
+  suffix = [var.runner_name]
+}
+
+locals {
+  managed_vnet_name   = module.naming.virtual_network.name
+  managed_subnet_name = module.naming.subnet.name
+}
+
+data "azurerm_client_config" "current" {}
+
+# Explicitly register Microsoft.App to avoid 409 during ACA creation
+resource "azapi_resource_action" "register_microsoft_app" {
+  type        = "Microsoft.App@2022-03-01"
+  resource_id = "/subscriptions/${data.azurerm_client_config.current.subscription_id}/providers/Microsoft.App"
+  action      = "register"
+  method      = "POST"
 }
 
 # Lookup existing subnet only when an existing network is specified
@@ -15,43 +35,43 @@ data "azurerm_subnet" "existing" {
 }
 
 resource "azurerm_resource_group" "resource_group" {
-  name     = "rg-${var.runner_name}"
+  name     = module.naming.resource_group.name
   location = var.location
 }
 
 # Create VNet/Subnet only when a network was not provided
-resource "azurerm_virtual_network" "virtual_network" {
-  count               = local.create_network ? 1 : 0
-  name                = "vnet-${var.runner_name}"
-  location            = azurerm_resource_group.resource_group.location
-  resource_group_name = azurerm_resource_group.resource_group.name
-  address_space       = var.vnet_address_space
-}
+module "runner_virtual_network" {
+  count   = local.create_network ? 1 : 0
+  source  = "Azure/avm-res-network-virtualnetwork/azurerm"
+  version = "0.16.0"
 
-resource "azurerm_subnet" "this" {
-  count                = local.create_network ? 1 : 0
-  name                 = "snet-${var.runner_name}"
-  resource_group_name  = azurerm_resource_group.resource_group.name
-  virtual_network_name = azurerm_virtual_network.virtual_network[0].name
-  address_prefixes     = var.subnet_address_prefixes
+  enable_telemetry = false
 
-  delegation {
-    name = "aca-delegation"
-    service_delegation {
-      name = "Microsoft.App/environments"
-      actions = [
-        "Microsoft.Network/virtualNetworks/subnets/join/action"
-      ]
+  name          = local.managed_vnet_name
+  location      = azurerm_resource_group.resource_group.location
+  parent_id     = azurerm_resource_group.resource_group.id
+  address_space = var.vnet_address_space
+
+  subnets = {
+    "${local.managed_subnet_name}" = {
+      name             = local.managed_subnet_name
+      address_prefixes = var.subnet_address_prefixes
+      delegations = [{
+        name = "aca-delegation"
+        service_delegation = {
+          name = "Microsoft.App/environments"
+        }
+      }]
     }
   }
 }
 
 locals {
-  subnet_id = local.create_network ? azurerm_subnet.this[0].id : data.azurerm_subnet.existing[0].id
+  subnet_id = local.create_network ? module.runner_virtual_network[0].subnets[local.managed_subnet_name].resource_id : data.azurerm_subnet.existing[0].id
 }
 
 resource "azurerm_log_analytics_workspace" "log_analytics_workspace" {
-  name                = "law-${var.runner_name}"
+  name                = module.naming.log_analytics_workspace.name
   location            = azurerm_resource_group.resource_group.location
   resource_group_name = azurerm_resource_group.resource_group.name
   sku                 = "PerGB2018"
@@ -59,12 +79,14 @@ resource "azurerm_log_analytics_workspace" "log_analytics_workspace" {
 }
 
 resource "azurerm_container_app_environment" "container_app_environment" {
-  name                               = var.runner_name
+  name                               = module.naming.container_app_environment.name
   location                           = azurerm_resource_group.resource_group.location
   resource_group_name                = azurerm_resource_group.resource_group.name
   infrastructure_subnet_id           = local.subnet_id
   log_analytics_workspace_id         = azurerm_log_analytics_workspace.log_analytics_workspace.id
   infrastructure_resource_group_name = "dev-${var.runner_name}-${var.runner_name}-${var.location}"
+  internal_load_balancer_enabled     = true
+  depends_on                         = [azapi_resource_action.register_microsoft_app]
 
   workload_profile {
     name                  = "Consumption"
@@ -75,16 +97,22 @@ resource "azurerm_container_app_environment" "container_app_environment" {
 }
 
 resource "azurerm_container_app_job" "container_app_job" {
-  name                         = "${var.runner_name}-job"
+  name                         = "${module.naming.container_app.name}-job"
   location                     = azurerm_resource_group.resource_group.location
   resource_group_name          = azurerm_resource_group.resource_group.name
   container_app_environment_id = azurerm_container_app_environment.container_app_environment.id
-  replica_timeout_in_seconds   = 1800
+  replica_timeout_in_seconds   = 3600
   replica_retry_limit          = 0
   workload_profile_name        = "Consumption"
 
   identity {
     type = "SystemAssigned"
+  }
+
+  registry {
+    server               = "ghcr.io"
+    username             = var.owner
+    password_secret_name = "personal-access-token"
   }
 
   template {
@@ -107,7 +135,7 @@ resource "azurerm_container_app_job" "container_app_job" {
       }
       // Needed to fix MSI issue https://github.com/microsoft/azure-container-apps/issues/502
       env {
-        name = "APPSETTING_WEBSITE_SITE_NAME"
+        name  = "APPSETTING_WEBSITE_SITE_NAME"
         value = "azcli-workaround"
       }
     }
