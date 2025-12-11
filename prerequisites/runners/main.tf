@@ -84,7 +84,7 @@ resource "azurerm_container_app_environment" "container_app_environment" {
   resource_group_name                = azurerm_resource_group.resource_group.name
   infrastructure_subnet_id           = local.subnet_id
   log_analytics_workspace_id         = azurerm_log_analytics_workspace.log_analytics_workspace.id
-  infrastructure_resource_group_name = "dev-${var.runner_name}-${var.runner_name}-${var.location}"
+  infrastructure_resource_group_name = "${azurerm_resource_group.resource_group.name}-runners"
   internal_load_balancer_enabled     = true
   depends_on                         = [azapi_resource_action.register_microsoft_app]
 
