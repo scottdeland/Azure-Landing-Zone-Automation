@@ -17,6 +17,13 @@ terraform {
       version = "~> 3.5"
     }
   }
+    backend "azurerm" {
+    environment          = "public"
+    resource_group_name  = "rg-gh-services"
+    storage_account_name = "satfstatedeland"
+    container_name       = "tfstate"
+    key                  = "ghrunner.tfstate"
+  }
 }
 
 provider "azurerm" {
