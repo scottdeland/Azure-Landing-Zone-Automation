@@ -1,0 +1,36 @@
+name: Test Prereqs Runner
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner_label:
+        description: "Label of the self-hosted runner to target (e.g., self-hosted, ghinfra)"
+        required: false
+        default: self-hosted
+  pull_request:
+    paths:
+      - ".github/workflows/wf-test-prereqs.yml"
+      - "prerequisites/runners/**"
+
+permissions:
+  contents: read
+
+jobs:
+  runner-smoke:
+    name: Validate runner executes a task
+    runs-on: ${{ inputs.runner_label || 'self-hosted' }}
+    steps:
+      - name: Run a simple task
+        run: echo "Runner is up and can execute commands."
+
+      - name: Show runner details
+        run: |
+          echo "Runner name: ${{ runner.name }}"
+          echo "Runner OS:   ${{ runner.os }}"
+          echo "Runner arch: ${{ runner.arch }}"
+          echo "Working dir: $(pwd)"
+
+      - name: Check basic tooling
+        run: |
+          which bash
+          uname -a
