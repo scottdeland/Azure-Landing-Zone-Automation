@@ -3,7 +3,7 @@ azure_environment = "public"
 
 # Github Configuration
 owner      = "scottdeland"
-repo       = "docker-images"
+repo       = "Azure-Landing-Zone-Automation"
 github_pat = "***update-token-here***"
 
 # Runner Configuration
