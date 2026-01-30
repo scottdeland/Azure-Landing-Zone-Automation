@@ -1,0 +1,14 @@
+name: "App AKS Dev Plan/Apply"
+
+on:
+  workflow_dispatch:
+
+jobs:
+  app-aks-dev:
+    uses: ./.github/workflows/wf-tf-plan-apply.yml
+    with:
+      workload-directory: app-aks-dev
+      working-directory: landing-zones/app-aks
+      tfvars-path: dev/terraform.tfvars
+      environment: dev
+    secrets: inherit

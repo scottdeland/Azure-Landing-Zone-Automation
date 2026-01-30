@@ -9,6 +9,10 @@ This landing zone provisions a private, service-integrated platform in East US t
 
 All infrastructure is built with Azure Verified Modules (AVM) and a naming module for consistent naming.
 
+Exceptions (no AVM module available today; kept as azurerm resources):
+- Azure Monitor action group, metric alerts, workbook, and subscription Activity Log diagnostic setting
+- API Management child resources (logger, diagnostic, API definitions)
+
 ## Architecture summary
 
 Core building blocks:
@@ -117,6 +121,23 @@ Identity & access:
 
 - Role assignment: AKS kubelet identity → ACR (AcrPull)
 - Role assignment: Web App identities → Key Vault (Key Vault Secrets User)
+
+## Observability (logging + diagnostics)
+
+- Log Analytics workspace dedicated to the landing zone (PerGB2018, 30-day retention).
+- Application Insights enabled for both web apps (frontend + backend), linked to the workspace.
+- Application Insights logger for API Management (gateway diagnostics).
+- AKS OMS agent enabled to send cluster logs/metrics to the workspace.
+- Subscription Activity Log streamed to Log Analytics.
+- NSG flow logs (Traffic Analytics) enabled on the APIM NSG.
+- App Service HTTP/application logs enabled (file system with 7-day retention).
+- Azure Monitor action group + metric alerts (App Service Plan CPU, Web App HTTP 5xx, SQL DTU).
+- App-AKS overview workbook deployed in Azure Monitor.
+- Diagnostic settings stream logs/metrics to Log Analytics for:
+  - VNet, AKS, ACR, App Gateway (and its public IP)
+  - API Management, Key Vault, Service Bus, Redis
+  - SQL Server + SQL Database
+  - Storage accounts (account-level metrics plus Blob/File service logs)
 
 ## Inputs and outputs
 

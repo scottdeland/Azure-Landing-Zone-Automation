@@ -1,80 +1,16 @@
-locals {
-  tags = merge(
-    {
-      "landing-zone" = var.name_prefix
-      "environment"  = var.environment
-    },
-    var.tags
-  )
-}
-
 module "naming" {
   source = "../../modules/terraform-azurerm-naming"
   suffix = [var.name_prefix, var.environment, var.location_short]
 }
 
-locals {
-  subnet_names = {
-    app_gateway        = "${module.naming.subnet.name}-appgw"
-    aks                = "${module.naming.subnet.name}-aks"
-    appsvc_integration = "${module.naming.subnet.name}-appsvc"
-    private_endpoints  = "${module.naming.subnet.name}-pep"
-    apim               = "${module.naming.subnet.name}-apim"
-  }
-}
-
-locals {
-  apim_nsg_name = "${module.naming.network_security_group.name}-apim"
-  app_service_plan_name = module.naming.app_service_plan.name
-  app_service_names = {
-    frontend = "${module.naming.app_service.name}-fe"
-    backend  = "${module.naming.app_service.name}-be"
-  }
-  app_gateway_subnet_id = module.virtual_network.subnets[local.subnet_names.app_gateway].resource_id
-  apim_subnet_id        = module.virtual_network.subnets[local.subnet_names.apim].resource_id
-  app_gateway_ip_restrictions = {
-    app_gateway = {
-      name                      = "allow-appgw"
-      priority                  = 100
-      action                    = "Allow"
-      virtual_network_subnet_id = local.app_gateway_subnet_id
-    }
-  }
-  apim_ip_restrictions = {
-    apim = {
-      name                      = "allow-apim"
-      priority                  = 100
-      action                    = "Allow"
-      virtual_network_subnet_id = local.apim_subnet_id
-    }
-  }
-  app_service_private_endpoint_names = {
-    frontend = "pep-${local.app_service_names.frontend}"
-    backend  = "pep-${local.app_service_names.backend}"
-  }
-  app_service_fqdns = {
-    frontend = "${local.app_service_names.frontend}.azurewebsites.net"
-    backend  = "${local.app_service_names.backend}.azurewebsites.net"
-  }
-  apim_name                     = module.naming.api_management.name
-  apim_gateway_fqdn             = "${module.naming.api_management.name}.azure-api.net"
-  apim_private_endpoint_name    = "pep-${module.naming.api_management.name}"
-  apim_private_endpoint_nic_name = "nic-${local.apim_private_endpoint_name}"
-  apim_backend_url              = "https://${local.app_service_fqdns.backend}"
-  apim_backend_api_name          = "backend"
-  apim_backend_api_path          = "api"
-}
-
-locals {
-  storage_account_base = replace(module.naming.storage_account.name, "-", "")
-  storage_account_names = {
-    aks_nfs  = substr("${local.storage_account_base}nfs", 0, 24)
-    app_blob = substr("${local.storage_account_base}blob", 0, 24)
-  }
-  sql_admin_login = "sqladminuser"
-}
-
 data "azurerm_client_config" "current" {}
+
+data "azurerm_subscription" "current" {}
+
+data "azurerm_virtual_network" "ghinfra" {
+  name                = var.ghinfra_vnet_name
+  resource_group_name = var.ghinfra_resource_group_name
+}
 
 resource "random_password" "sql_admin" {
   length           = 24
@@ -96,61 +32,270 @@ module "resource_group" {
   tags             = local.tags
 }
 
-resource "azurerm_network_security_group" "apim_gateway" {
-  name                = local.apim_nsg_name
-  location            = var.location
+module "log_analytics_workspace" {
+  source  = "Azure/avm-res-operationalinsights-workspace/azurerm"
+  version = "0.5.1"
+
+  enable_telemetry = false
+  name             = module.naming.log_analytics_workspace.name
+  location         = var.location
   resource_group_name = module.resource_group.name
-  tags                = local.tags
+  log_analytics_workspace_sku = "PerGB2018"
+  log_analytics_workspace_retention_in_days = 30
+  tags             = local.tags
 }
 
-resource "azurerm_network_security_rule" "apim_allow_appgw_https" {
-  name                        = "${module.naming.network_security_group_rule.name}-apim-allow-appgw"
-  priority                    = 100
-  direction                   = "Inbound"
-  access                      = "Allow"
-  protocol                    = "Tcp"
-  source_port_range           = "*"
-  destination_port_ranges     = ["443", "80"]
-  source_address_prefix       = var.subnet_cidrs.app_gateway
-  destination_address_prefix  = var.subnet_cidrs.apim
-  resource_group_name         = module.resource_group.name
-  network_security_group_name = azurerm_network_security_group.apim_gateway.name
-}
-
-resource "azurerm_network_security_rule" "apim_deny_vnet_http_https" {
-  name                        = "${module.naming.network_security_group_rule.name}-apim-deny-vnet"
-  priority                    = 200
-  direction                   = "Inbound"
-  access                      = "Deny"
-  protocol                    = "Tcp"
-  source_port_range           = "*"
-  destination_port_ranges     = ["443", "80"]
-  source_address_prefix       = "VirtualNetwork"
-  destination_address_prefix  = var.subnet_cidrs.apim
-  resource_group_name         = module.resource_group.name
-  network_security_group_name = azurerm_network_security_group.apim_gateway.name
-}
-
-resource "azurerm_public_ip" "aks_nat_gateway" {
-  name                = "pip-${module.naming.nat_gateway.name}"
-  location            = var.location
+data "azurerm_log_analytics_workspace" "solution" {
+  name                = module.naming.log_analytics_workspace.name
   resource_group_name = module.resource_group.name
-  allocation_method   = "Static"
-  sku                 = "Standard"
-  tags                = local.tags
 }
 
-resource "azurerm_nat_gateway" "aks" {
-  name                = module.naming.nat_gateway.name
-  location            = var.location
+resource "azurerm_monitor_action_group" "alerts" {
+  count               = local.alerts_enabled ? 1 : 0
+  name                = module.naming.monitor_action_group.name
   resource_group_name = module.resource_group.name
-  sku_name            = "Standard"
+  short_name          = substr(module.naming.monitor_action_group.name, 0, 12)
   tags                = local.tags
+
+  dynamic "email_receiver" {
+    for_each = toset(var.alert_email_receivers)
+    content {
+      name          = "email-${substr(md5(email_receiver.value), 0, 6)}"
+      email_address = email_receiver.value
+    }
+  }
 }
 
-resource "azurerm_nat_gateway_public_ip_association" "aks" {
-  nat_gateway_id       = azurerm_nat_gateway.aks.id
-  public_ip_address_id = azurerm_public_ip.aks_nat_gateway.id
+resource "random_uuid" "workbook" {}
+
+resource "azurerm_monitor_workbook" "app_aks_overview" {
+  name                = random_uuid.workbook.result
+  resource_group_name = module.resource_group.name
+  location            = var.location
+  display_name        = "App-AKS Overview"
+  source_id           = module.log_analytics_workspace.resource_id
+  tags                = local.tags
+
+  data_json = jsonencode({
+    version = "Notebook/1.0"
+    items = [
+      {
+        type = 1
+        name = "title"
+        content = {
+          json = "# App-AKS Overview\nThis workbook is scoped to the landing zone Log Analytics workspace."
+        }
+      }
+    ]
+  })
+}
+
+module "application_insights" {
+  source  = "Azure/avm-res-insights-component/azurerm"
+  version = "0.2.0"
+
+  enable_telemetry = false
+  name             = module.naming.application_insights.name
+  location         = var.location
+  resource_group_name = module.resource_group.name
+  application_type = "web"
+  workspace_id     = module.log_analytics_workspace.resource_id
+  tags             = local.tags
+}
+
+resource "azurerm_monitor_diagnostic_setting" "subscription_activity_log" {
+  name                       = "diag-activity-log"
+  target_resource_id         = data.azurerm_subscription.current.id
+  log_analytics_workspace_id = module.log_analytics_workspace.resource_id
+
+  enabled_log {
+    category = "Administrative"
+  }
+  enabled_log {
+    category = "Security"
+  }
+  enabled_log {
+    category = "ServiceHealth"
+  }
+  enabled_log {
+    category = "Alert"
+  }
+  enabled_log {
+    category = "Recommendation"
+  }
+  enabled_log {
+    category = "Policy"
+  }
+  enabled_log {
+    category = "Autoscale"
+  }
+  enabled_log {
+    category = "ResourceHealth"
+  }
+}
+
+resource "azurerm_monitor_metric_alert" "app_service_plan_cpu" {
+  count               = local.alerts_enabled ? 1 : 0
+  name                = "alert-${module.naming.app_service_plan.name}-cpu"
+  resource_group_name = module.resource_group.name
+  scopes              = [module.app_service_plan.resource_id]
+  description         = "App Service Plan CPU > 80% for 5 minutes."
+  severity            = 2
+  frequency           = "PT1M"
+  window_size         = "PT5M"
+
+  criteria {
+    metric_namespace = "Microsoft.Web/serverFarms"
+    metric_name      = "CpuPercentage"
+    aggregation      = "Average"
+    operator         = "GreaterThan"
+    threshold        = 80
+  }
+
+  action {
+    action_group_id = azurerm_monitor_action_group.alerts[0].id
+  }
+}
+
+resource "azurerm_monitor_metric_alert" "web_app_http_5xx" {
+  for_each            = local.alerts_enabled ? { frontend = module.web_app_frontend.resource_id, backend = module.web_app_backend.resource_id } : {}
+  name                = "alert-${local.app_service_names[each.key]}-http5xx"
+  resource_group_name = module.resource_group.name
+  scopes              = [each.value]
+  description         = "HTTP 5xx responses detected on the web app."
+  severity            = 2
+  frequency           = "PT1M"
+  window_size         = "PT5M"
+
+  criteria {
+    metric_namespace = "Microsoft.Web/sites"
+    metric_name      = "Http5xx"
+    aggregation      = "Total"
+    operator         = "GreaterThan"
+    threshold        = 5
+  }
+
+  action {
+    action_group_id = azurerm_monitor_action_group.alerts[0].id
+  }
+}
+
+resource "azurerm_monitor_metric_alert" "sql_database_dtu" {
+  count               = local.alerts_enabled ? 1 : 0
+  name                = "alert-${module.naming.mssql_database.name}-dtu"
+  resource_group_name = module.resource_group.name
+  scopes              = [module.sql_database.resource_id]
+  description         = "SQL Database DTU consumption > 80% for 5 minutes."
+  severity            = 2
+  frequency           = "PT1M"
+  window_size         = "PT5M"
+
+  criteria {
+    metric_namespace = "Microsoft.Sql/servers/databases"
+    metric_name      = "dtu_consumption_percent"
+    aggregation      = "Average"
+    operator         = "GreaterThan"
+    threshold        = 80
+  }
+
+  action {
+    action_group_id = azurerm_monitor_action_group.alerts[0].id
+  }
+}
+
+module "apim_nsg" {
+  source  = "Azure/avm-res-network-networksecuritygroup/azurerm"
+  version = "0.5.0"
+
+  enable_telemetry = false
+  name             = local.apim_nsg_name
+  location         = var.location
+  resource_group_name = module.resource_group.name
+  tags             = local.tags
+  security_rules = {
+    allow_appgw_https = {
+      name                        = "${module.naming.network_security_group_rule.name}-apim-allow-appgw"
+      priority                    = 100
+      direction                   = "Inbound"
+      access                      = "Allow"
+      protocol                    = "Tcp"
+      source_port_range           = "*"
+      destination_port_ranges     = ["443", "80"]
+      source_address_prefix       = var.subnet_cidrs.app_gateway
+      destination_address_prefix  = var.subnet_cidrs.apim
+    }
+    deny_vnet_http_https = {
+      name                        = "${module.naming.network_security_group_rule.name}-apim-deny-vnet"
+      priority                    = 200
+      direction                   = "Inbound"
+      access                      = "Deny"
+      protocol                    = "Tcp"
+      source_port_range           = "*"
+      destination_port_ranges     = ["443", "80"]
+      source_address_prefix       = "VirtualNetwork"
+      destination_address_prefix  = var.subnet_cidrs.apim
+    }
+  }
+}
+
+data "azurerm_network_watcher" "current" {
+  name                = "NetworkWatcher_${lower(replace(var.location, " ", ""))}"
+  resource_group_name = "NetworkWatcherRG"
+}
+
+module "network_watcher" {
+  source  = "Azure/avm-res-network-networkwatcher/azurerm"
+  version = "0.3.2"
+
+  enable_telemetry     = false
+  network_watcher_id   = data.azurerm_network_watcher.current.id
+  network_watcher_name = data.azurerm_network_watcher.current.name
+  resource_group_name  = data.azurerm_network_watcher.current.resource_group_name
+  location             = data.azurerm_network_watcher.current.location
+
+  flow_logs = {
+    apim_nsg = {
+      name                      = "flow-${local.apim_nsg_name}"
+      network_security_group_id = module.apim_nsg.resource_id
+      storage_account_id        = module.storage_account_nsg_logs.resource_id
+      enabled                   = true
+
+      retention_policy = {
+        enabled = true
+        days    = 30
+      }
+
+      traffic_analytics = {
+        enabled               = true
+        workspace_id          = data.azurerm_log_analytics_workspace.solution.workspace_id
+        workspace_region      = lower(replace(var.location, " ", ""))
+        workspace_resource_id = module.log_analytics_workspace.resource_id
+        interval_in_minutes   = 60
+      }
+    }
+  }
+}
+
+module "nat_gateway" {
+  source  = "Azure/avm-res-network-natgateway/azurerm"
+  version = "0.2.1"
+
+  enable_telemetry = false
+  name             = module.naming.nat_gateway.name
+  location         = var.location
+  resource_group_name = module.resource_group.name
+  tags             = local.tags
+
+  public_ip_configuration = {
+    allocation_method = "Static"
+    sku               = "Standard"
+  }
+
+  public_ips = {
+    primary = {
+      name = "pip-${module.naming.nat_gateway.name}"
+    }
+  }
 }
 
 module "virtual_network" {
@@ -163,6 +308,7 @@ module "virtual_network" {
   parent_id        = module.resource_group.resource_id
   address_space    = [var.vnet_cidr]
   tags             = local.tags
+  diagnostic_settings = local.aks_diagnostic_settings
 
   subnets = {
     "${local.subnet_names.app_gateway}" = {
@@ -173,7 +319,7 @@ module "virtual_network" {
       name             = local.subnet_names.aks
       address_prefixes = [var.subnet_cidrs.aks]
       nat_gateway = {
-        id = azurerm_nat_gateway.aks.id
+        id = module.nat_gateway.resource_id
       }
     }
     "${local.subnet_names.appsvc_integration}" = {
@@ -195,34 +341,51 @@ module "virtual_network" {
       name             = local.subnet_names.apim
       address_prefixes = [var.subnet_cidrs.apim]
       network_security_group = {
-        id = azurerm_network_security_group.apim_gateway.id
+        id = module.apim_nsg.resource_id
       }
+    }
+  }
+
+  virtual_network_peerings = {
+    ghinfra = {
+      name                          = "peer-${module.naming.virtual_network.name}-to-${var.ghinfra_vnet_name}"
+      remote_virtual_network_resource_id = data.azurerm_virtual_network.ghinfra.id
+      allow_virtual_network_access = true
+      allow_forwarded_traffic      = true
+      allow_gateway_transit        = false
+      use_remote_gateways          = false
+      create_reverse_peering       = true
+      reverse_name                 = "peer-${var.ghinfra_vnet_name}-to-${module.naming.virtual_network.name}"
+      reverse_allow_virtual_network_access = true
+      reverse_allow_forwarded_traffic      = true
+      reverse_allow_gateway_transit        = false
     }
   }
 }
 
 module "private_dns_zone" {
-  for_each = var.private_dns_zones
+  for_each = local.private_dns_zones
 
   source  = "Azure/avm-res-network-privatednszone/azurerm"
   version = "0.4.4"
 
   enable_telemetry = false
-  domain_name      = each.value
+  domain_name      = each.key
   parent_id        = module.resource_group.resource_id
   tags             = local.tags
 
   virtual_network_links = {
     "vnet-link" = {
-      name               = "pdnslink-${replace(each.value, ".", "-")}"
+      name               = "pdnslink-${replace(each.key, ".", "-")}"
       virtual_network_id = module.virtual_network.resource_id
       registration_enabled = false
     }
+    "ghinfra-link" = {
+      name               = "pdnslink-ghinfra-${replace(each.key, ".", "-")}"
+      virtual_network_id = data.azurerm_virtual_network.ghinfra.id
+      registration_enabled = false
+    }
   }
-}
-
-locals {
-  aks_private_dns_zone_name = "privatelink.${lower(replace(var.location, " ", ""))}.azmk8s.io"
 }
 
 module "aks_private_dns_zone" {
@@ -238,6 +401,11 @@ module "aks_private_dns_zone" {
     "vnet-link" = {
       name                  = "pdnslink-${replace(local.aks_private_dns_zone_name, ".", "-")}"
       virtual_network_id    = module.virtual_network.resource_id
+      registration_enabled  = false
+    }
+    "ghinfra-link" = {
+      name                  = "pdnslink-ghinfra-${replace(local.aks_private_dns_zone_name, ".", "-")}"
+      virtual_network_id    = data.azurerm_virtual_network.ghinfra.id
       registration_enabled  = false
     }
   }
@@ -266,6 +434,13 @@ module "aks" {
   network_profile = {
     outbound_type = "userAssignedNATGateway"
   }
+  diagnostic_settings = local.diagnostic_settings
+  addon_profile_oms_agent = {
+    enabled = true
+    config = {
+      log_analytics_workspace_resource_id = module.log_analytics_workspace.resource_id
+    }
+  }
 
   # Private DNS zone managed separately; module doesn't accept private_dns_zone_id input.
 
@@ -286,6 +461,7 @@ module "container_registry" {
   resource_group_name = module.resource_group.name
   tags               = local.tags
   public_network_access_enabled = false
+  diagnostic_settings = local.diagnostic_settings
 }
 
 module "app_service_plan" {
@@ -315,6 +491,30 @@ module "web_app_frontend" {
   https_only                = true
   virtual_network_subnet_id = module.virtual_network.subnets[local.subnet_names.appsvc_integration].resource_id
   public_network_access_enabled = false
+  enable_application_insights   = true
+  application_insights = {
+    workspace_resource_id = module.log_analytics_workspace.resource_id
+  }
+  diagnostic_settings           = local.diagnostic_settings
+  logs = {
+    app_service_logs = {
+      application_logs = {
+        file_system_level = {
+          file_system_level = "Information"
+        }
+      }
+      http_logs = {
+        file_system_level = {
+          file_system = {
+            retention_in_days = 7
+            retention_in_mb   = 35
+          }
+        }
+      }
+      detailed_error_messages = true
+      failed_request_tracing  = true
+    }
+  }
   managed_identities = {
     system_assigned = true
   }
@@ -340,6 +540,30 @@ module "web_app_backend" {
   https_only                = true
   virtual_network_subnet_id = module.virtual_network.subnets[local.subnet_names.appsvc_integration].resource_id
   public_network_access_enabled = false
+  enable_application_insights   = true
+  application_insights = {
+    workspace_resource_id = module.log_analytics_workspace.resource_id
+  }
+  diagnostic_settings           = local.diagnostic_settings
+  logs = {
+    app_service_logs = {
+      application_logs = {
+        file_system_level = {
+          file_system_level = "Information"
+        }
+      }
+      http_logs = {
+        file_system_level = {
+          file_system = {
+            retention_in_days = 7
+            retention_in_mb   = 35
+          }
+        }
+      }
+      detailed_error_messages = true
+      failed_request_tracing  = true
+    }
+  }
   managed_identities = {
     system_assigned = true
   }
@@ -351,42 +575,25 @@ module "web_app_backend" {
   tags                      = local.tags
 }
 
-module "web_app_frontend_private_endpoint" {
+module "private_endpoints" {
+  for_each = local.private_endpoints
+
   source  = "Azure/avm-res-network-privateendpoint/azurerm"
   version = "0.2.0"
 
-  enable_telemetry    = false
-  name                = local.app_service_private_endpoint_names.frontend
-  network_interface_name = "nic-${local.app_service_private_endpoint_names.frontend}"
-  location            = var.location
-  resource_group_name = module.resource_group.name
-  subnet_resource_id  = module.virtual_network.subnets[local.subnet_names.private_endpoints].resource_id
-  tags                = local.tags
+  enable_telemetry       = false
+  name                   = each.value.name
+  network_interface_name = each.value.network_interface_name
+  location               = var.location
+  resource_group_name    = module.resource_group.name
+  subnet_resource_id     = module.virtual_network.subnets[local.subnet_names.private_endpoints].resource_id
+  tags                   = local.tags
 
-  private_connection_resource_id = module.web_app_frontend.resource_id
-  private_service_connection_name = "psc-${local.app_service_names.frontend}"
-  subresource_names               = ["sites"]
-  private_dns_zone_group_name    = "default"
-  private_dns_zone_resource_ids   = [module.private_dns_zone["privatelink.azurewebsites.net"].resource_id]
-}
-
-module "web_app_backend_private_endpoint" {
-  source  = "Azure/avm-res-network-privateendpoint/azurerm"
-  version = "0.2.0"
-
-  enable_telemetry    = false
-  name                = local.app_service_private_endpoint_names.backend
-  network_interface_name = "nic-${local.app_service_private_endpoint_names.backend}"
-  location            = var.location
-  resource_group_name = module.resource_group.name
-  subnet_resource_id  = module.virtual_network.subnets[local.subnet_names.private_endpoints].resource_id
-  tags                = local.tags
-
-  private_connection_resource_id = module.web_app_backend.resource_id
-  private_service_connection_name = "psc-${local.app_service_names.backend}"
-  subresource_names               = ["sites"]
-  private_dns_zone_group_name    = "default"
-  private_dns_zone_resource_ids   = [module.private_dns_zone["privatelink.azurewebsites.net"].resource_id]
+  private_connection_resource_id  = each.value.resource_id
+  private_service_connection_name = each.value.service_connection_name
+  subresource_names               = each.value.subresource_names
+  private_dns_zone_group_name     = "default"
+  private_dns_zone_resource_ids   = [module.private_dns_zone[each.value.private_dns_zone].resource_id]
 }
 
 module "app_gateway_public_ip" {
@@ -400,6 +607,7 @@ module "app_gateway_public_ip" {
   allocation_method   = "Static"
   sku                 = "Standard"
   tags                = local.tags
+  diagnostic_settings = local.diagnostic_settings
 }
 
 module "application_gateway" {
@@ -411,6 +619,7 @@ module "application_gateway" {
   location            = var.location
   resource_group_name = module.resource_group.name
   tags                = local.tags
+  diagnostic_settings = local.diagnostic_settings
 
   sku = {
     name     = "WAF_v2"
@@ -543,29 +752,32 @@ module "api_management" {
   publisher_email     = var.apim_publisher_email
   sku_name            = var.apim_sku_name
   tags                = local.tags
+  diagnostic_settings = local.diagnostic_settings
 
   virtual_network_type = "Internal"
   virtual_network_subnet_id = module.virtual_network.subnets[local.subnet_names.apim].resource_id
   public_network_access_enabled = true
 }
 
-module "api_management_private_endpoint" {
-  source  = "Azure/avm-res-network-privateendpoint/azurerm"
-  version = "0.2.0"
+resource "azurerm_api_management_logger" "appinsights" {
+  name                = "appinsights"
+  resource_group_name = module.resource_group.name
+  api_management_name = local.apim_name
 
-  enable_telemetry       = false
-  name                   = local.apim_private_endpoint_name
-  network_interface_name = local.apim_private_endpoint_nic_name
-  location               = var.location
-  resource_group_name    = module.resource_group.name
-  subnet_resource_id     = module.virtual_network.subnets[local.subnet_names.private_endpoints].resource_id
-  tags                   = local.tags
+  application_insights {
+    instrumentation_key = module.application_insights.instrumentation_key
+  }
+}
 
-  private_connection_resource_id  = module.api_management.resource_id
-  private_service_connection_name = "psc-${local.apim_name}"
-  subresource_names               = ["gateway"]
-  private_dns_zone_group_name    = "default"
-  private_dns_zone_resource_ids   = [module.private_dns_zone["privatelink.azure-api.net"].resource_id]
+resource "azurerm_api_management_diagnostic" "appinsights" {
+  identifier                 = "applicationinsights"
+  resource_group_name        = module.resource_group.name
+  api_management_name        = local.apim_name
+  api_management_logger_id   = azurerm_api_management_logger.appinsights.id
+  always_log_errors          = true
+  sampling_percentage        = 100
+  verbosity                  = "information"
+  http_correlation_protocol  = "W3C"
 }
 
 resource "azurerm_api_management_api" "backend" {
@@ -593,6 +805,7 @@ module "key_vault" {
   sku_name         = "standard"
   tags             = local.tags
   public_network_access_enabled = false
+  diagnostic_settings = local.diagnostic_settings
 }
 
 module "servicebus_namespace" {
@@ -607,6 +820,7 @@ module "servicebus_namespace" {
   capacity = 1
   public_network_access_enabled = false
   tags = local.tags
+  diagnostic_settings = local.diagnostic_settings
 }
 
 module "redis_cache" {
@@ -621,6 +835,24 @@ module "redis_cache" {
   capacity         = 1
   zones            = null
   public_network_access_enabled = false
+  tags             = local.tags
+  diagnostic_settings = local.diagnostic_settings
+}
+
+module "storage_account_nsg_logs" {
+  source  = "Azure/avm-res-storage-storageaccount/azurerm"
+  version = "0.6.7"
+
+  enable_telemetry = false
+  name             = local.storage_account_names.nsg_logs
+  location         = var.location
+  resource_group_name = module.resource_group.name
+  account_kind     = "StorageV2"
+  account_tier     = "Standard"
+  account_replication_type = "LRS"
+  public_network_access_enabled = true
+  shared_access_key_enabled      = true
+  default_to_oauth_authentication = false
   tags             = local.tags
 }
 
@@ -639,6 +871,8 @@ module "storage_account_aks_nfs" {
   shared_access_key_enabled      = true
   default_to_oauth_authentication = false
   tags             = local.tags
+  diagnostic_settings_storage_account = local.diagnostic_settings_storage_account
+  diagnostic_settings_file            = local.diagnostic_settings_file
 }
 
 module "storage_account_app_blob" {
@@ -656,6 +890,8 @@ module "storage_account_app_blob" {
   shared_access_key_enabled      = true
   default_to_oauth_authentication = false
   tags             = local.tags
+  diagnostic_settings_storage_account = local.diagnostic_settings_storage_account
+  diagnostic_settings_blob            = local.diagnostic_settings_blob
 }
 
 module "sql_server" {
@@ -671,6 +907,7 @@ module "sql_server" {
   server_version   = "12.0"
   tags             = local.tags
   public_network_access_enabled = false
+  diagnostic_settings = local.diagnostic_settings
 }
 
 module "sql_database" {
@@ -682,174 +919,9 @@ module "sql_database" {
     resource_id = module.sql_server.resource_id
   }
   sku_name = "S0"
+  zone_redundant = false
   tags     = merge(local.tags, { workload_environment = "development" })
-}
-locals {
-  private_endpoint_names = {
-    container_registry = "pep-${module.naming.container_registry.name}"
-    key_vault           = "pep-${module.naming.key_vault.name}"
-    servicebus          = "pep-${module.naming.servicebus_namespace.name}"
-    redis               = "pep-${module.naming.redis_cache.name}"
-    storage_aks_nfs      = "pep-${local.storage_account_names.aks_nfs}"
-    storage_app_blob     = "pep-${local.storage_account_names.app_blob}"
-    sql_database         = "pep-${module.naming.mssql_database.name}"
-  }
-}
-
-locals {
-  role_assignments = {
-    aks_acr_pull = {
-      principal_id         = module.aks.kubelet_identity.objectId
-      role_definition_name = "AcrPull"
-      scope                = module.container_registry.resource_id
-      principal_type       = "ServicePrincipal"
-    }
-    web_app_frontend_kv_secrets = {
-      principal_id         = module.web_app_frontend.system_assigned_mi_principal_id
-      role_definition_name = "Key Vault Secrets User"
-      scope                = module.key_vault.resource_id
-      principal_type       = "ServicePrincipal"
-    }
-    web_app_backend_kv_secrets = {
-      principal_id         = module.web_app_backend.system_assigned_mi_principal_id
-      role_definition_name = "Key Vault Secrets User"
-      scope                = module.key_vault.resource_id
-      principal_type       = "ServicePrincipal"
-    }
-  }
-}
-
-module "container_registry_private_endpoint" {
-  source  = "Azure/avm-res-network-privateendpoint/azurerm"
-  version = "0.2.0"
-
-  enable_telemetry       = false
-  name                   = local.private_endpoint_names.container_registry
-  network_interface_name = "nic-${local.private_endpoint_names.container_registry}"
-  location               = var.location
-  resource_group_name    = module.resource_group.name
-  subnet_resource_id     = module.virtual_network.subnets[local.subnet_names.private_endpoints].resource_id
-  tags                   = local.tags
-
-  private_connection_resource_id  = module.container_registry.resource_id
-  private_service_connection_name = "psc-${module.naming.container_registry.name}"
-  subresource_names               = ["registry"]
-  private_dns_zone_group_name    = "default"
-  private_dns_zone_resource_ids   = [module.private_dns_zone["privatelink.azurecr.io"].resource_id]
-}
-
-module "key_vault_private_endpoint" {
-  source  = "Azure/avm-res-network-privateendpoint/azurerm"
-  version = "0.2.0"
-
-  enable_telemetry       = false
-  name                   = local.private_endpoint_names.key_vault
-  network_interface_name = "nic-${local.private_endpoint_names.key_vault}"
-  location               = var.location
-  resource_group_name    = module.resource_group.name
-  subnet_resource_id     = module.virtual_network.subnets[local.subnet_names.private_endpoints].resource_id
-  tags                   = local.tags
-
-  private_connection_resource_id  = module.key_vault.resource_id
-  private_service_connection_name = "psc-${module.naming.key_vault.name}"
-  subresource_names               = ["vault"]
-  private_dns_zone_group_name    = "default"
-  private_dns_zone_resource_ids   = [module.private_dns_zone["privatelink.vaultcore.azure.net"].resource_id]
-}
-
-module "servicebus_private_endpoint" {
-  source  = "Azure/avm-res-network-privateendpoint/azurerm"
-  version = "0.2.0"
-
-  enable_telemetry       = false
-  name                   = local.private_endpoint_names.servicebus
-  network_interface_name = "nic-${local.private_endpoint_names.servicebus}"
-  location               = var.location
-  resource_group_name    = module.resource_group.name
-  subnet_resource_id     = module.virtual_network.subnets[local.subnet_names.private_endpoints].resource_id
-  tags                   = local.tags
-
-  private_connection_resource_id  = module.servicebus_namespace.resource_id
-  private_service_connection_name = "psc-${module.naming.servicebus_namespace.name}"
-  subresource_names               = ["namespace"]
-  private_dns_zone_group_name    = "default"
-  private_dns_zone_resource_ids   = [module.private_dns_zone["privatelink.servicebus.windows.net"].resource_id]
-}
-
-module "redis_private_endpoint" {
-  source  = "Azure/avm-res-network-privateendpoint/azurerm"
-  version = "0.2.0"
-
-  enable_telemetry       = false
-  name                   = local.private_endpoint_names.redis
-  network_interface_name = "nic-${local.private_endpoint_names.redis}"
-  location               = var.location
-  resource_group_name    = module.resource_group.name
-  subnet_resource_id     = module.virtual_network.subnets[local.subnet_names.private_endpoints].resource_id
-  tags                   = local.tags
-
-  private_connection_resource_id  = module.redis_cache.resource_id
-  private_service_connection_name = "psc-${module.naming.redis_cache.name}"
-  subresource_names               = ["redisCache"]
-  private_dns_zone_group_name    = "default"
-  private_dns_zone_resource_ids   = [module.private_dns_zone["privatelink.redis.cache.windows.net"].resource_id]
-}
-
-module "storage_account_aks_nfs_private_endpoint" {
-  source  = "Azure/avm-res-network-privateendpoint/azurerm"
-  version = "0.2.0"
-
-  enable_telemetry       = false
-  name                   = local.private_endpoint_names.storage_aks_nfs
-  network_interface_name = "nic-${local.private_endpoint_names.storage_aks_nfs}"
-  location               = var.location
-  resource_group_name    = module.resource_group.name
-  subnet_resource_id     = module.virtual_network.subnets[local.subnet_names.private_endpoints].resource_id
-  tags                   = local.tags
-
-  private_connection_resource_id  = module.storage_account_aks_nfs.resource_id
-  private_service_connection_name = "psc-${local.storage_account_names.aks_nfs}"
-  subresource_names               = ["file"]
-  private_dns_zone_group_name    = "default"
-  private_dns_zone_resource_ids   = [module.private_dns_zone["privatelink.file.core.windows.net"].resource_id]
-}
-
-module "storage_account_app_blob_private_endpoint" {
-  source  = "Azure/avm-res-network-privateendpoint/azurerm"
-  version = "0.2.0"
-
-  enable_telemetry       = false
-  name                   = local.private_endpoint_names.storage_app_blob
-  network_interface_name = "nic-${local.private_endpoint_names.storage_app_blob}"
-  location               = var.location
-  resource_group_name    = module.resource_group.name
-  subnet_resource_id     = module.virtual_network.subnets[local.subnet_names.private_endpoints].resource_id
-  tags                   = local.tags
-
-  private_connection_resource_id  = module.storage_account_app_blob.resource_id
-  private_service_connection_name = "psc-${local.storage_account_names.app_blob}"
-  subresource_names               = ["blob"]
-  private_dns_zone_group_name    = "default"
-  private_dns_zone_resource_ids   = [module.private_dns_zone["privatelink.blob.core.windows.net"].resource_id]
-}
-
-module "sql_database_private_endpoint" {
-  source  = "Azure/avm-res-network-privateendpoint/azurerm"
-  version = "0.2.0"
-
-  enable_telemetry       = false
-  name                   = local.private_endpoint_names.sql_database
-  network_interface_name = "nic-${local.private_endpoint_names.sql_database}"
-  location               = var.location
-  resource_group_name    = module.resource_group.name
-  subnet_resource_id     = module.virtual_network.subnets[local.subnet_names.private_endpoints].resource_id
-  tags                   = local.tags
-
-  private_connection_resource_id  = module.sql_database.resource_id
-  private_service_connection_name = "psc-${module.naming.mssql_database.name}"
-  subresource_names               = ["sqlDatabase"]
-  private_dns_zone_group_name    = "default"
-  private_dns_zone_resource_ids   = [module.private_dns_zone["privatelink.database.windows.net"].resource_id]
+  diagnostic_settings = local.diagnostic_settings
 }
 
 module "role_assignments" {

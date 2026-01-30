@@ -80,6 +80,24 @@ variable "tags" {
   default     = {}
 }
 
+variable "alert_email_receivers" {
+  type        = list(string)
+  description = "Email addresses to receive Azure Monitor alerts."
+  default     = []
+}
+
+variable "ghinfra_vnet_name" {
+  type        = string
+  description = "Name of the GitHub runner VNet for peering."
+  default     = "vnet-ghinfra"
+}
+
+variable "ghinfra_resource_group_name" {
+  type        = string
+  description = "Resource group name of the GitHub runner VNet."
+  default     = "rg-ghinfra"
+}
+
 variable "avm_versions" {
   type = object({
     resource_group      = string

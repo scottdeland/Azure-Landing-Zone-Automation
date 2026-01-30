@@ -30,6 +30,13 @@ apim_sku_name         = "Developer_1"
 
 tags = {}
 
+alert_email_receivers = [
+  "apim-admin@example.com"
+]
+
+ghinfra_vnet_name           = "vnet-ghinfra"
+ghinfra_resource_group_name = "rg-ghinfra"
+
 avm_versions = {
   resource_group      = "0.4.0"
   virtual_network     = "0.16.0"
