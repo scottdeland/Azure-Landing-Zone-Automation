@@ -510,7 +510,9 @@ module "web_app_frontend" {
   }
   site_config = {
     application_stack = {
-      node_version = "18"
+      default = {
+        node_version = "18"
+      }
     }
     ip_restriction_default_action     = "Deny"
     scm_ip_restriction_default_action = "Deny"
@@ -562,7 +564,9 @@ module "web_app_backend" {
   }
   site_config = {
     application_stack = {
-      dotnet_version = "8.0"
+      default = {
+        dotnet_version = "8.0"
+      }
     }
     ip_restriction_default_action     = "Deny"
     scm_ip_restriction_default_action = "Deny"
@@ -926,14 +930,14 @@ resource "azurerm_monitor_diagnostic_setting" "postgresql" {
   log_analytics_workspace_id = module.log_analytics_workspace.resource_id
 
   dynamic "enabled_log" {
-    for_each = toset(data.azurerm_monitor_diagnostic_categories.postgresql.logs)
+    for_each = toset(data.azurerm_monitor_diagnostic_categories.postgresql.log_category_types)
     content {
       category = enabled_log.value
     }
   }
 
   dynamic "metric" {
-    for_each = toset(data.azurerm_monitor_diagnostic_categories.postgresql.metrics)
+    for_each = toset(data.azurerm_monitor_diagnostic_categories.postgresql.metric_category_types)
     content {
       category = metric.value
       enabled  = true
