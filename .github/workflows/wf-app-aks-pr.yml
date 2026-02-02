@@ -1,0 +1,22 @@
+name: "App AKS Dev Plan (PR)"
+
+on:
+  pull_request:
+    branches: [main]   # or main, whichever you use
+    paths:
+      - "landing-zones/app-aks/**"
+      - ".github/workflows/**"
+
+jobs:
+  app-aks-dev-plan:
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    uses: ./.github/workflows/wf-tf-plan-apply.yml
+    with:
+      workload-directory: app-aks-dev
+      working-directory: landing-zones/app-aks
+      tfvars-path: dev/terraform.tfvars
+      environment: dev
+    secrets: inherit
