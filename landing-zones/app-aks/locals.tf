@@ -60,6 +60,7 @@ locals {
   # APIM resource names and URLs.
   apim_name                     = module.naming.api_management.name
   apim_gateway_fqdn             = "${module.naming.api_management.name}.azure-api.net"
+  apim_private_ip               = module.api_management.private_ip_addresses[0]
   apim_private_endpoint_name    = "pep-${module.naming.api_management.name}"
   apim_private_endpoint_nic_name = "nic-${local.apim_private_endpoint_name}"
   apim_backend_url              = "https://${local.app_service_fqdns.backend}"
@@ -74,8 +75,8 @@ locals {
     app_blob = substr("${local.storage_account_base}blob", 0, 24)
     nsg_logs = substr("${local.storage_account_base}nsg", 0, 24)
   }
-  # SQL admin login name.
-  sql_admin_login = "sqladminuser"
+  # PostgreSQL admin login name.
+  postgres_admin_login = "pgadminuser"
 
   # AKS private DNS zone name for the selected region.
   aks_private_dns_zone_name = "privatelink.${lower(replace(var.location, " ", ""))}.azmk8s.io"
@@ -157,13 +158,13 @@ locals {
       subresource_names    = ["blob"]
       private_dns_zone     = "privatelink.blob.core.windows.net"
     }
-    sql_database = {
-      name                   = "pep-${module.naming.mssql_database.name}"
-      network_interface_name = "nic-pep-${module.naming.mssql_database.name}"
-      resource_id          = module.sql_database.resource_id
-      service_connection_name = "psc-${module.naming.mssql_database.name}"
-      subresource_names    = ["sqlDatabase"]
-      private_dns_zone     = "privatelink.database.windows.net"
+    postgresql_server = {
+      name                   = "pep-${module.naming.postgresql_server.name}"
+      network_interface_name = "nic-pep-${module.naming.postgresql_server.name}"
+      resource_id          = module.postgresql_flexible_server.resource_id
+      service_connection_name = "psc-${module.naming.postgresql_server.name}"
+      subresource_names    = ["postgresqlServer"]
+      private_dns_zone     = "privatelink.postgres.database.azure.com"
     }
   }
 
@@ -233,6 +234,7 @@ locals {
       metric_categories             = ["AllMetrics"]
     }
   }
+
 
   # AKS diagnostic settings (includes audit logs via allLogs group).
   aks_diagnostic_settings = {

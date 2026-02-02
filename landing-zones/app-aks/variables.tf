@@ -44,12 +44,13 @@ variable "private_dns_zones" {
   type        = set(string)
   description = "Private DNS zones required for private endpoints."
   default = [
+    "azure-api.net",
     "privatelink.azure-api.net",
     "privatelink.azurecr.io",
     "privatelink.azurewebsites.net",
     "privatelink.blob.core.windows.net",
-    "privatelink.database.windows.net",
     "privatelink.file.core.windows.net",
+    "privatelink.postgres.database.azure.com",
     "privatelink.redis.cache.windows.net",
     "privatelink.servicebus.windows.net",
     "privatelink.vaultcore.azure.net",
@@ -86,6 +87,12 @@ variable "alert_email_receivers" {
   default     = []
 }
 
+variable "enable_nsg_flow_logs" {
+  type        = bool
+  description = "Enable NSG flow logs (creation is blocked for new flow logs as of 2025-06-30)."
+  default     = false
+}
+
 variable "ghinfra_vnet_name" {
   type        = string
   description = "Name of the GitHub runner VNet for peering."
@@ -116,8 +123,7 @@ variable "avm_versions" {
     servicebus_namespace = string
     redis_cache         = string
     storage_account     = string
-    sql_server          = string
-    sql_database        = string
+    postgresql_flexible_server = string
   })
   description = "Pinned versions for Azure Verified Modules used by this landing zone."
   default = {
@@ -137,7 +143,6 @@ variable "avm_versions" {
     servicebus_namespace = "0.5.0"
     redis_cache         = "0.5.0"
     storage_account     = "0.5.0"
-    sql_server          = "0.5.0"
-    sql_database        = "0.5.0"
+    postgresql_flexible_server = "0.5.0"
   }
 }

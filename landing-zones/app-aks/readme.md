@@ -5,13 +5,14 @@ This landing zone provisions a private, service-integrated platform in East US t
 - AKS for container workloads
 - App Service (frontend + backend) behind App Gateway and API Management
 - Private endpoints + private DNS for all PaaS services
-- Shared platform services (ACR, Key Vault, SQL, Service Bus, Redis, Storage)
+- Shared platform services (ACR, Key Vault, PostgreSQL, Service Bus, Redis, Storage)
 
 All infrastructure is built with Azure Verified Modules (AVM) and a naming module for consistent naming.
 
 Exceptions (no AVM module available today; kept as azurerm resources):
 - Azure Monitor action group, metric alerts, workbook, and subscription Activity Log diagnostic setting
 - API Management child resources (logger, diagnostic, API definitions)
+- PostgreSQL Flexible Server database (created via azurerm resource)
 
 ## Architecture summary
 
@@ -23,7 +24,7 @@ Core building blocks:
 - App Service Plan (Windows) hosting frontend/back web apps
 - AKS private cluster (system-assigned identity)
 - ACR (private)
-- Key Vault, SQL Server + DB, Service Bus, Redis, Storage (private)
+- Key Vault, PostgreSQL Flexible Server, Service Bus, Redis, Storage (private)
 - Private DNS zones for every private endpoint + AKS private DNS zone
 - Role assignments for AKS → ACR and App Services → Key Vault
 
@@ -44,7 +45,7 @@ flowchart LR
   APIM --- PrivateEndpointSubnet
   ACR --- PrivateEndpointSubnet
   KeyVault --- PrivateEndpointSubnet
-  SQL --- PrivateEndpointSubnet
+  PostgreSQL --- PrivateEndpointSubnet
   ServiceBus --- PrivateEndpointSubnet
   Redis --- PrivateEndpointSubnet
   StorageBlob --- PrivateEndpointSubnet
@@ -58,7 +59,7 @@ flowchart LR
   PrivateEndpointSubnet -->|NICs| ACR[ACR PE]
   PrivateEndpointSubnet --> KV[Key Vault PE]
   PrivateEndpointSubnet --> SB[Service Bus PE]
-  PrivateEndpointSubnet --> SQL[SQL PE]
+  PrivateEndpointSubnet --> PostgreSQL[PostgreSQL PE]
   PrivateEndpointSubnet --> REDIS[Redis PE]
   PrivateEndpointSubnet --> StorageBlob[Blob PE]
   PrivateEndpointSubnet --> StorageNFS[File PE]
@@ -68,7 +69,7 @@ flowchart LR
   PrivateDNSZones --> ACR
   PrivateDNSZones --> KV
   PrivateDNSZones --> SB
-  PrivateDNSZones --> SQL
+  PrivateDNSZones --> PostgreSQL
   PrivateDNSZones --> REDIS
   PrivateDNSZones --> StorageBlob
   PrivateDNSZones --> StorageNFS
@@ -109,12 +110,13 @@ Data + integration:
 - Key Vault (private, RBAC)
 - Service Bus (Standard)
 - Redis Cache (Standard, note: zones require Premium)
-- SQL Server + SQL Database (S0)
+- PostgreSQL Flexible Server (private access via private endpoint)
 - Storage (Premium FileStorage for NFS; Standard StorageV2 for blobs)
 
 Private connectivity:
 
-- Private endpoints for ACR, KV, Service Bus, Redis, SQL, storage (file/blob), APIM, frontend web app, backend web app
+- Private endpoints for ACR, KV, Service Bus, Redis, PostgreSQL, storage (file/blob), APIM (gateway), frontend web app, backend web app
+- Private DNS zone `azure-api.net` with A records for APIM gateway/management endpoints (for internal VNet control plane access)
 - Private DNS zones and VNet links for all private endpoints + AKS private DNS zone
 
 Identity & access:
@@ -129,14 +131,14 @@ Identity & access:
 - Application Insights logger for API Management (gateway diagnostics).
 - AKS OMS agent enabled to send cluster logs/metrics to the workspace.
 - Subscription Activity Log streamed to Log Analytics.
-- NSG flow logs (Traffic Analytics) enabled on the APIM NSG.
+- NSG flow logs (Traffic Analytics) optional for the APIM NSG (disabled by default).
 - App Service HTTP/application logs enabled (file system with 7-day retention).
-- Azure Monitor action group + metric alerts (App Service Plan CPU, Web App HTTP 5xx, SQL DTU).
+- Azure Monitor action group + metric alerts (App Service Plan CPU, Web App HTTP 5xx).
 - App-AKS overview workbook deployed in Azure Monitor.
 - Diagnostic settings stream logs/metrics to Log Analytics for:
   - VNet, AKS, ACR, App Gateway (and its public IP)
   - API Management, Key Vault, Service Bus, Redis
-  - SQL Server + SQL Database
+  - PostgreSQL Flexible Server
   - Storage accounts (account-level metrics plus Blob/File service logs)
 
 ## Inputs and outputs
@@ -187,10 +189,10 @@ Redis:
 - Standard for non-critical caching
 - Premium required if you enable zones (module defaults to zones)
 
-SQL Database:
+PostgreSQL Flexible Server:
 
-- S0 for low throughput
-- S1/S2 or GP/BC tiers for higher DTU/IO needs
+- Burstable for dev/test (B-series)
+- General Purpose for sustained workloads
 
 Application Gateway:
 
@@ -214,7 +216,6 @@ These values were pulled from `https://prices.azure.com/api/retail/prices` using
 | API Management Developer_1 | `serviceName eq 'API Management' and skuName eq 'Developer_1'` | ~$1.58/day (~$0.066/hour) | Cheapest way to expose APIs internally. citeturn18search1 |
 | Redis Standard C1 (no zones) | `serviceName eq 'Azure Cache for Redis' and skuName eq 'Standard C1'` | ~$100.74/month | Standard tier base price before zones (Premium required for `zones`). citeturn23search1 |
 | Service Bus Standard | `serviceName eq 'Service Bus' and skuName eq 'Standard'` | $0.0851/hour per messaging unit (first unit) | Base messaging unit charge; operations billed separately. citeturn21search1 |
-| SQL Database S0 | `serviceName eq 'Azure SQL Database' and skuName eq 'S0'` | ~$18.40/month (~$0.030/hour) | Basic DTU tier for low throughput dev workloads. citeturn24search2 |
 | Container Registry Premium | `serviceName eq 'Container Registry' and skuName eq 'Premium'` | ~$1.677/day (~$0.070/hour) | Premium is required for private endpoints and geo-replication. citeturn26search2 |
 
 ## Cost estimate (East US)
@@ -245,7 +246,7 @@ Everything else is billed per-instance or per-usage. Use the Retail Prices API f
 - API Management Developer tier
 - Redis Standard C1
 - Service Bus Standard namespace
-- SQL Database S0
+- PostgreSQL Flexible Server
 - ACR Premium
 - Private Endpoints (10)
 - Private DNS zones (10)
@@ -256,7 +257,7 @@ Everything else is billed per-instance or per-usage. Use the Retail Prices API f
 
 - PremiumV3 quota is required for the App Service Plan (P1v3).
 - Redis zones require Premium; set `zones = null` (or switch to Premium) if using Standard.
-- SQL Server provisioning can be restricted by region/tenant; pick another region or request an exception if blocked.
+- PostgreSQL Flexible Server provisioning can be restricted by region/tenant; pick another region or request an exception if blocked.
 
 ## Files to know
 
