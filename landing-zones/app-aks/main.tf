@@ -893,7 +893,7 @@ module "storage_account_app_blob" {
 
 module "postgresql_flexible_server" {
   source  = "Azure/avm-res-dbforpostgresql-flexibleserver/azurerm"
-  version = var.avm_versions.postgresql_flexible_server
+  version = "0.5.0"
 
   enable_telemetry = false
   name             = module.naming.postgresql_server.name
