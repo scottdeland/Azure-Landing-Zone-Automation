@@ -345,22 +345,30 @@ module "virtual_network" {
       }
     }
   }
+}
 
-  virtual_network_peerings = {
-    ghinfra = {
-      name                          = "peer-${module.naming.virtual_network.name}-to-${var.ghinfra_vnet_name}"
-      remote_virtual_network_resource_id = data.azurerm_virtual_network.ghinfra.id
-      allow_virtual_network_access = true
-      allow_forwarded_traffic      = true
-      allow_gateway_transit        = false
-      use_remote_gateways          = false
-      create_reverse_peering       = true
-      reverse_name                 = "peer-${var.ghinfra_vnet_name}-to-${module.naming.virtual_network.name}"
-      reverse_allow_virtual_network_access = true
-      reverse_allow_forwarded_traffic      = true
-      reverse_allow_gateway_transit        = false
-    }
-  }
+resource "azurerm_virtual_network_peering" "app_to_ghinfra" {
+  name                      = "peer-${module.naming.virtual_network.name}-to-${var.ghinfra_vnet_name}"
+  resource_group_name       = module.resource_group.name
+  virtual_network_name      = module.naming.virtual_network.name
+  remote_virtual_network_id = data.azurerm_virtual_network.ghinfra.id
+  allow_virtual_network_access = true
+  allow_forwarded_traffic      = true
+  allow_gateway_transit        = false
+  use_remote_gateways          = false
+  depends_on = [module.virtual_network]
+}
+
+resource "azurerm_virtual_network_peering" "ghinfra_to_app" {
+  name                      = "peer-${var.ghinfra_vnet_name}-to-${module.naming.virtual_network.name}"
+  resource_group_name       = data.azurerm_virtual_network.ghinfra.resource_group_name
+  virtual_network_name      = data.azurerm_virtual_network.ghinfra.name
+  remote_virtual_network_id = module.virtual_network.resource_id
+  allow_virtual_network_access = true
+  allow_forwarded_traffic      = true
+  allow_gateway_transit        = false
+  use_remote_gateways          = false
+  depends_on = [module.virtual_network]
 }
 
 module "private_dns_zone" {
