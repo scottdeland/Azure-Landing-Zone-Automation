@@ -229,9 +229,17 @@ module "apim_nsg" {
   }
 }
 
-data "azurerm_network_watcher" "current" {
+resource "azurerm_resource_group" "network_watcher" {
+  name     = "NetworkWatcherRG"
+  location = var.location
+  tags     = local.tags
+}
+
+resource "azurerm_network_watcher" "current" {
   name                = "NetworkWatcher_${lower(replace(var.location, " ", ""))}"
-  resource_group_name = "NetworkWatcherRG"
+  location            = var.location
+  resource_group_name = azurerm_resource_group.network_watcher.name
+  tags                = local.tags
 }
 
 module "network_watcher" {
@@ -239,10 +247,10 @@ module "network_watcher" {
   version = "0.3.2"
 
   enable_telemetry     = false
-  network_watcher_id   = data.azurerm_network_watcher.current.id
-  network_watcher_name = data.azurerm_network_watcher.current.name
-  resource_group_name  = data.azurerm_network_watcher.current.resource_group_name
-  location             = data.azurerm_network_watcher.current.location
+  network_watcher_id   = azurerm_network_watcher.current.id
+  network_watcher_name = azurerm_network_watcher.current.name
+  resource_group_name  = azurerm_network_watcher.current.resource_group_name
+  location             = azurerm_network_watcher.current.location
 
   flow_logs = var.enable_nsg_flow_logs ? {
     apim_nsg = {
