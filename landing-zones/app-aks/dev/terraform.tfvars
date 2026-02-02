@@ -17,8 +17,8 @@ private_dns_zones = [
   "privatelink.azurecr.io",
   "privatelink.azurewebsites.net",
   "privatelink.blob.core.windows.net",
-  "privatelink.database.windows.net",
   "privatelink.file.core.windows.net",
+  "privatelink.postgres.database.azure.com",
   "privatelink.redis.cache.windows.net",
   "privatelink.servicebus.windows.net",
   "privatelink.vaultcore.azure.net",
@@ -54,6 +54,5 @@ avm_versions = {
   servicebus_namespace = "0.5.0"
   redis_cache         = "0.5.0"
   storage_account     = "0.5.0"
-  sql_server          = "0.5.0"
-  sql_database        = "0.5.0"
+  postgresql_flexible_server = "0.5.0"
 }

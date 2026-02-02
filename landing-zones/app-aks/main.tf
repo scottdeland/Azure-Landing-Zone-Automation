@@ -12,7 +12,7 @@ data "azurerm_virtual_network" "ghinfra" {
   resource_group_name = var.ghinfra_resource_group_name
 }
 
-resource "random_password" "sql_admin" {
+resource "random_password" "postgres_admin" {
   length           = 24
   min_lower        = 1
   min_upper        = 1
@@ -74,7 +74,7 @@ resource "azurerm_application_insights_workbook" "app_aks_overview" {
   resource_group_name = module.resource_group.name
   location            = var.location
   display_name        = "App-AKS Overview"
-  source_id           = module.log_analytics_workspace.resource_id
+  source_id           = lower(module.log_analytics_workspace.resource_id)
   tags                = local.tags
 
   data_json = jsonencode({
@@ -181,28 +181,7 @@ resource "azurerm_monitor_metric_alert" "web_app_http_5xx" {
   }
 }
 
-resource "azurerm_monitor_metric_alert" "sql_database_dtu" {
-  count               = local.alerts_enabled ? 1 : 0
-  name                = "alert-${module.naming.mssql_database.name}-dtu"
-  resource_group_name = module.resource_group.name
-  scopes              = [module.sql_database.resource_id]
-  description         = "SQL Database DTU consumption > 80% for 5 minutes."
-  severity            = 2
-  frequency           = "PT1M"
-  window_size         = "PT5M"
-
-  criteria {
-    metric_namespace = "Microsoft.Sql/servers/databases"
-    metric_name      = "dtu_consumption_percent"
-    aggregation      = "Average"
-    operator         = "GreaterThan"
-    threshold        = 80
-  }
-
-  action {
-    action_group_id = azurerm_monitor_action_group.alerts[0].id
-  }
-}
+// SQL DTU alert removed with PostgreSQL migration.
 
 module "apim_nsg" {
   source  = "Azure/avm-res-network-networksecuritygroup/azurerm"
@@ -254,7 +233,7 @@ module "network_watcher" {
   resource_group_name  = data.azurerm_network_watcher.current.resource_group_name
   location             = data.azurerm_network_watcher.current.location
 
-  flow_logs = {
+  flow_logs = var.enable_nsg_flow_logs ? {
     apim_nsg = {
       name                      = "flow-${local.apim_nsg_name}"
       network_security_group_id = module.apim_nsg.resource_id
@@ -275,7 +254,7 @@ module "network_watcher" {
       }
       target_resource_id = module.apim_nsg.resource_id
     }
-  }
+  } : {}
 }
 
 module "nat_gateway" {
@@ -484,6 +463,7 @@ module "app_service_plan" {
   resource_group_name = module.resource_group.name
   os_type             = "Windows"
   sku_name            = "P1v3"
+  zone_balancing_enabled = false
   tags                = local.tags
 }
 
@@ -529,6 +509,9 @@ module "web_app_frontend" {
     system_assigned = true
   }
   site_config = {
+    application_stack = {
+      node_version = "18"
+    }
     ip_restriction_default_action     = "Deny"
     scm_ip_restriction_default_action = "Deny"
     ip_restriction                    = local.app_gateway_ip_restrictions
@@ -578,6 +561,9 @@ module "web_app_backend" {
     system_assigned = true
   }
   site_config = {
+    application_stack = {
+      dotnet_version = "8.0"
+    }
     ip_restriction_default_action     = "Deny"
     scm_ip_restriction_default_action = "Deny"
     ip_restriction                    = local.apim_ip_restrictions
@@ -773,6 +759,7 @@ resource "azurerm_api_management_logger" "appinsights" {
   name                = "appinsights"
   resource_group_name = module.resource_group.name
   api_management_name = local.apim_name
+  depends_on          = [module.api_management]
 
   application_insights {
     instrumentation_key = module.application_insights.instrumentation_key
@@ -904,34 +891,29 @@ module "storage_account_app_blob" {
   diagnostic_settings_blob            = local.diagnostic_settings_blob
 }
 
-module "sql_server" {
-  source  = "Azure/avm-res-sql-server/azurerm"
-  version = "0.1.6"
+module "postgresql_flexible_server" {
+  source  = "Azure/avm-res-dbforpostgresql-flexibleserver/azurerm"
+  version = var.avm_versions.postgresql_flexible_server
 
   enable_telemetry = false
-  name             = module.naming.mssql_server.name
+  name             = module.naming.postgresql_server.name
   location         = var.location
   resource_group_name = module.resource_group.name
-  administrator_login          = local.sql_admin_login
-  administrator_login_password = random_password.sql_admin.result
-  server_version   = "12.0"
-  tags             = local.tags
+  administrator_login    = local.postgres_admin_login
+  administrator_password = random_password.postgres_admin.result
+  sku_name         = "B_Standard_B1ms"
+  server_version = "15"
+  storage_mb       = 32768
+  backup_retention_days = 7
   public_network_access_enabled = false
-  diagnostic_settings = local.diagnostic_settings
+  tags             = local.tags
 }
 
-module "sql_database" {
-  source  = "Azure/avm-res-sql-server/azurerm//modules/database"
-  version = "0.1.6"
-
-  name       = module.naming.mssql_database.name
-  sql_server = {
-    resource_id = module.sql_server.resource_id
-  }
-  sku_name = "S0"
-  zone_redundant = false
-  tags     = merge(local.tags, { workload_environment = "development" })
-  diagnostic_settings = local.diagnostic_settings
+resource "azurerm_postgresql_flexible_server_database" "app" {
+  name      = lower(module.naming.postgresql_database.name)
+  server_id = module.postgresql_flexible_server.resource_id
+  charset   = "UTF8"
+  collation = "en_US.utf8"
 }
 
 module "role_assignments" {
