@@ -204,6 +204,17 @@ module "apim_nsg" {
       source_address_prefix       = var.subnet_cidrs.app_gateway
       destination_address_prefix  = var.subnet_cidrs.apim
     }
+    allow_runner_apim_mgmt = {
+      name                        = "${module.naming.network_security_group_rule.name}-apim-allow-mgmt"
+      priority                    = 150
+      direction                   = "Inbound"
+      access                      = "Allow"
+      protocol                    = "Tcp"
+      source_port_range           = "*"
+      destination_port_ranges     = ["3443", "443"]
+      source_address_prefix       = "10.200.0.0/16"
+      destination_address_prefix  = var.subnet_cidrs.apim
+    }
     deny_vnet_http_https = {
       name                        = "${module.naming.network_security_group_rule.name}-apim-deny-vnet"
       priority                    = 200
