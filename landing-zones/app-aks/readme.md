@@ -115,7 +115,8 @@ Data + integration:
 
 Private connectivity:
 
-- Private endpoints for ACR, KV, Service Bus, Redis, PostgreSQL, storage (file/blob), APIM, frontend web app, backend web app
+- Private endpoints for ACR, KV, Service Bus, Redis, PostgreSQL, storage (file/blob), APIM (gateway), frontend web app, backend web app
+- Private DNS zone `azure-api.net` with A records for APIM gateway/management endpoints (for internal VNet control plane access)
 - Private DNS zones and VNet links for all private endpoints + AKS private DNS zone
 
 Identity & access:

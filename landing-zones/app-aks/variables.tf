@@ -44,6 +44,7 @@ variable "private_dns_zones" {
   type        = set(string)
   description = "Private DNS zones required for private endpoints."
   default = [
+    "azure-api.net",
     "privatelink.azure-api.net",
     "privatelink.azurecr.io",
     "privatelink.azurewebsites.net",

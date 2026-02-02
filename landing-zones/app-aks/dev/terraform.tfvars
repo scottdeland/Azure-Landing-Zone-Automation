@@ -13,6 +13,7 @@ subnet_cidrs = {
 }
 
 private_dns_zones = [
+  "azure-api.net",
   "privatelink.azure-api.net",
   "privatelink.azurecr.io",
   "privatelink.azurewebsites.net",

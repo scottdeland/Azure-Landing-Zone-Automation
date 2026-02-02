@@ -362,6 +362,33 @@ module "private_dns_zone" {
   domain_name      = each.key
   parent_id        = module.resource_group.resource_id
   tags             = local.tags
+  a_records = each.key == "azure-api.net" ? {
+    apim_gateway = {
+      name         = local.apim_name
+      ttl          = 300
+      ip_addresses = toset([local.apim_private_ip])
+    }
+    apim_management = {
+      name         = "${local.apim_name}.management"
+      ttl          = 300
+      ip_addresses = toset([local.apim_private_ip])
+    }
+    apim_portal = {
+      name         = "${local.apim_name}.portal"
+      ttl          = 300
+      ip_addresses = toset([local.apim_private_ip])
+    }
+    apim_developer = {
+      name         = "${local.apim_name}.developer"
+      ttl          = 300
+      ip_addresses = toset([local.apim_private_ip])
+    }
+    apim_scm = {
+      name         = "${local.apim_name}.scm"
+      ttl          = 300
+      ip_addresses = toset([local.apim_private_ip])
+    }
+  } : {}
 
   virtual_network_links = {
     "vnet-link" = {

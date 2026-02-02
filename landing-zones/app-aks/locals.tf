@@ -60,6 +60,7 @@ locals {
   # APIM resource names and URLs.
   apim_name                     = module.naming.api_management.name
   apim_gateway_fqdn             = "${module.naming.api_management.name}.azure-api.net"
+  apim_private_ip               = module.api_management.private_ip_addresses[0]
   apim_private_endpoint_name    = "pep-${module.naming.api_management.name}"
   apim_private_endpoint_nic_name = "nic-${local.apim_private_endpoint_name}"
   apim_backend_url              = "https://${local.app_service_fqdns.backend}"
