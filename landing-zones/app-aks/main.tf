@@ -511,6 +511,7 @@ module "web_app_frontend" {
   site_config = {
     application_stack = {
       default = {
+        current_stack = "node"
         node_version = "18"
       }
     }
@@ -565,6 +566,7 @@ module "web_app_backend" {
   site_config = {
     application_stack = {
       default = {
+        current_stack = "dotnet"
         dotnet_version = "8.0"
       }
     }
