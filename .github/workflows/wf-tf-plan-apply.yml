@@ -9,6 +9,13 @@ on:
       working-directory:
         required: true
         type: string
+      tfvars-path:
+        required: true
+        type: string
+      backend-config-key:
+        required: false
+        type: string
+        default: ""
       environment:
         required: true
         type: string
@@ -46,13 +53,18 @@ jobs:
       
       - name: Terraform Init
         id: init
-        run: terraform init -backend-config="key=solution-${{ inputs.workload-directory }}-lz.tfstate"
+        run: |
+          if ("${{ inputs.backend-config-key }}" -ne "") {
+            terraform init -backend-config="key=${{ inputs.backend-config-key }}"
+          } else {
+            terraform init
+          }
 
       - name: Terraform Plan
         id: plan
         run: |
           terraform plan \
-            -var-file="solutions/${{ inputs.workload-directory }}/terraform.tfvars" \
+            -var-file="${{ inputs.tfvars-path }}" \
             -no-color \
             -out tfplan
     
@@ -74,12 +86,6 @@ jobs:
     env:
       ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
       ACTIONS_STEP_DEBUG: true
-      TF_VAR_domain_fqdn: ${{ secrets.DOMAIN_FQDN }}
-      TF_VAR_domain_join_OU: ${{ secrets.DOMAIN_JOIN_OU }}
-      TF_VAR_domain_join_password: ${{ secrets.DOMAIN_JOIN_PASSWORD }}
-      TF_VAR_domain_join_user: ${{ secrets.DOMAIN_JOIN_USER }}
-      TF_VAR_local_admin_username: ${{ secrets.LOCAL_ADMIN_USERNAME }}
-      TF_VAR_local_admin_password: ${{ secrets.LOCAL_ADMIN_PASSWORD }}
       TF_VAR_sa_key: ${{ secrets.SA_PASSWORD }}
 
     steps:
@@ -95,7 +101,12 @@ jobs:
     
       - name: Terraform Init
         id: init
-        run: terraform init -backend-config="key=solution-${{ inputs.workload-directory}}-lz.tfstate"
+        run: |
+          if ("${{ inputs.backend-config-key }}" -ne "") {
+            terraform init -backend-config="key=${{ inputs.backend-config-key }}"
+          } else {
+            terraform init
+          }
 
       - name: Download Terraform Plan
         uses: actions/download-artifact@v4
