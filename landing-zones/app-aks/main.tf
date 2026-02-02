@@ -48,6 +48,7 @@ module "log_analytics_workspace" {
 data "azurerm_log_analytics_workspace" "solution" {
   name                = module.naming.log_analytics_workspace.name
   resource_group_name = module.resource_group.name
+  depends_on          = [module.log_analytics_workspace]
 }
 
 resource "azurerm_monitor_action_group" "alerts" {
