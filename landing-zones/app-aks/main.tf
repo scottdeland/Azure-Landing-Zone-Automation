@@ -185,7 +185,7 @@ resource "azurerm_monitor_metric_alert" "web_app_http_5xx" {
 
 module "apim_nsg" {
   source  = "Azure/avm-res-network-networksecuritygroup/azurerm"
-  version = "0.5.0"
+  version = "0.1.4"
 
   enable_telemetry = false
   name             = local.apim_nsg_name
@@ -914,6 +914,100 @@ resource "azurerm_postgresql_flexible_server_database" "app" {
   server_id = module.postgresql_flexible_server.resource_id
   charset   = "UTF8"
   collation = "en_US.utf8"
+}
+
+data "azurerm_monitor_diagnostic_categories" "postgresql" {
+  resource_id = module.postgresql_flexible_server.resource_id
+}
+
+resource "azurerm_monitor_diagnostic_setting" "postgresql" {
+  name                       = "diag-postgresql"
+  target_resource_id         = module.postgresql_flexible_server.resource_id
+  log_analytics_workspace_id = module.log_analytics_workspace.resource_id
+
+  dynamic "enabled_log" {
+    for_each = toset(data.azurerm_monitor_diagnostic_categories.postgresql.logs)
+    content {
+      category = enabled_log.value
+    }
+  }
+
+  dynamic "metric" {
+    for_each = toset(data.azurerm_monitor_diagnostic_categories.postgresql.metrics)
+    content {
+      category = metric.value
+      enabled  = true
+    }
+  }
+}
+
+resource "azurerm_monitor_metric_alert" "postgres_cpu" {
+  count               = local.alerts_enabled ? 1 : 0
+  name                = "alert-${module.naming.postgresql_server.name}-cpu"
+  resource_group_name = module.resource_group.name
+  scopes              = [module.postgresql_flexible_server.resource_id]
+  description         = "PostgreSQL CPU > 80% for 5 minutes."
+  severity            = 2
+  frequency           = "PT1M"
+  window_size         = "PT5M"
+
+  criteria {
+    metric_namespace = "Microsoft.DBforPostgreSQL/flexibleServers"
+    metric_name      = "cpu_percent"
+    aggregation      = "Average"
+    operator         = "GreaterThan"
+    threshold        = 80
+  }
+
+  action {
+    action_group_id = azurerm_monitor_action_group.alerts[0].id
+  }
+}
+
+resource "azurerm_monitor_metric_alert" "postgres_memory" {
+  count               = local.alerts_enabled ? 1 : 0
+  name                = "alert-${module.naming.postgresql_server.name}-memory"
+  resource_group_name = module.resource_group.name
+  scopes              = [module.postgresql_flexible_server.resource_id]
+  description         = "PostgreSQL memory > 80% for 5 minutes."
+  severity            = 2
+  frequency           = "PT1M"
+  window_size         = "PT5M"
+
+  criteria {
+    metric_namespace = "Microsoft.DBforPostgreSQL/flexibleServers"
+    metric_name      = "memory_percent"
+    aggregation      = "Average"
+    operator         = "GreaterThan"
+    threshold        = 80
+  }
+
+  action {
+    action_group_id = azurerm_monitor_action_group.alerts[0].id
+  }
+}
+
+resource "azurerm_monitor_metric_alert" "postgres_connections" {
+  count               = local.alerts_enabled ? 1 : 0
+  name                = "alert-${module.naming.postgresql_server.name}-connections"
+  resource_group_name = module.resource_group.name
+  scopes              = [module.postgresql_flexible_server.resource_id]
+  description         = "PostgreSQL active connections > 200 for 5 minutes."
+  severity            = 3
+  frequency           = "PT1M"
+  window_size         = "PT5M"
+
+  criteria {
+    metric_namespace = "Microsoft.DBforPostgreSQL/flexibleServers"
+    metric_name      = "active_connections"
+    aggregation      = "Average"
+    operator         = "GreaterThan"
+    threshold        = 200
+  }
+
+  action {
+    action_group_id = azurerm_monitor_action_group.alerts[0].id
+  }
 }
 
 module "role_assignments" {
