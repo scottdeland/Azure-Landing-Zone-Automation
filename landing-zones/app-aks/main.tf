@@ -920,28 +920,18 @@ resource "azurerm_postgresql_flexible_server_database" "app" {
   collation = "en_US.utf8"
 }
 
-data "azurerm_monitor_diagnostic_categories" "postgresql" {
-  resource_id = module.postgresql_flexible_server.resource_id
-}
-
 resource "azurerm_monitor_diagnostic_setting" "postgresql" {
   name                       = "diag-postgresql"
   target_resource_id         = module.postgresql_flexible_server.resource_id
   log_analytics_workspace_id = module.log_analytics_workspace.resource_id
 
-  dynamic "enabled_log" {
-    for_each = toset(data.azurerm_monitor_diagnostic_categories.postgresql.log_category_types)
-    content {
-      category = enabled_log.value
-    }
+  enabled_log {
+    category = "PostgreSQLLogs"
   }
 
-  dynamic "metric" {
-    for_each = toset(data.azurerm_monitor_diagnostic_categories.postgresql.metric_category_types)
-    content {
-      category = metric.value
-      enabled  = true
-    }
+  metric {
+    category = "AllMetrics"
+    enabled  = true
   }
 }
 
