@@ -68,7 +68,7 @@ resource "azurerm_monitor_action_group" "alerts" {
 
 resource "random_uuid" "workbook" {}
 
-resource "azurerm_monitor_workbook" "app_aks_overview" {
+resource "azurerm_application_insights_workbook" "app_aks_overview" {
   name                = random_uuid.workbook.result
   resource_group_name = module.resource_group.name
   location            = var.location
@@ -272,6 +272,7 @@ module "network_watcher" {
         workspace_resource_id = module.log_analytics_workspace.resource_id
         interval_in_minutes   = 60
       }
+      target_resource_id = module.apim_nsg.resource_id
     }
   }
 }
