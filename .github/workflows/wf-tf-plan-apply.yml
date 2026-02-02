@@ -12,10 +12,6 @@ on:
       tfvars-path:
         required: true
         type: string
-      backend-config-key:
-        required: false
-        type: string
-        default: ""
       environment:
         required: true
         type: string
@@ -54,11 +50,7 @@ jobs:
       - name: Terraform Init
         id: init
         run: |
-          if ("${{ inputs.backend-config-key }}" -ne "") {
-            terraform init -backend-config="key=${{ inputs.backend-config-key }}"
-          } else {
-            terraform init
-          }
+          terraform init
 
       - name: Terraform Plan
         id: plan
@@ -102,11 +94,7 @@ jobs:
       - name: Terraform Init
         id: init
         run: |
-          if ("${{ inputs.backend-config-key }}" -ne "") {
-            terraform init -backend-config="key=${{ inputs.backend-config-key }}"
-          } else {
-            terraform init
-          }
+          terraform init
 
       - name: Download Terraform Plan
         uses: actions/download-artifact@v4
