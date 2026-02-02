@@ -5,6 +5,10 @@ on:
 
 jobs:
   app-aks-dev:
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
     uses: ./.github/workflows/wf-tf-plan-apply.yml
     with:
       workload-directory: app-aks-dev
