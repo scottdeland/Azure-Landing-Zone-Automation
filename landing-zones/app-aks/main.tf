@@ -185,7 +185,7 @@ resource "azurerm_monitor_metric_alert" "web_app_http_5xx" {
 
 module "apim_nsg" {
   source  = "Azure/avm-res-network-networksecuritygroup/azurerm"
-  version = "0.1.4"
+  version = "0.5.1"
 
   enable_telemetry = false
   name             = local.apim_nsg_name
@@ -893,7 +893,7 @@ module "storage_account_app_blob" {
 
 module "postgresql_flexible_server" {
   source  = "Azure/avm-res-dbforpostgresql-flexibleserver/azurerm"
-  version = "0.5.0"
+  version = "0.1.4"
 
   enable_telemetry = false
   name             = module.naming.postgresql_server.name
