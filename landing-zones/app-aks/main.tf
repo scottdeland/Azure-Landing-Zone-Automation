@@ -512,7 +512,7 @@ module "web_app_frontend" {
     application_stack = {
       default = {
         current_stack = "node"
-        node_version = "18"
+        node_version = "~18"
       }
     }
     ip_restriction_default_action     = "Deny"
@@ -567,7 +567,7 @@ module "web_app_backend" {
     application_stack = {
       default = {
         current_stack = "dotnet"
-        dotnet_version = "8.0"
+        dotnet_version = "v8.0"
       }
     }
     ip_restriction_default_action     = "Deny"
