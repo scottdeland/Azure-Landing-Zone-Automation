@@ -33,9 +33,10 @@ Core building blocks:
 ```mermaid
 flowchart LR
   Internet --> AppGateway
-  AppGateway -->|/| WebAppFE
-  AppGateway -->|/api/*| APIM
-  APIM --> WebAppBE
+  AppGateway -->|/| WebAppFE-PE[Web App FE PE]
+  AppGateway -->|/api/*| APIM-PE[APIM PE]
+  APIM-PE --> APIM
+  APIM --> WebAppBE-PE[Web App BE PE]
   WebAppFE --> KeyVault
   WebAppBE --> KeyVault
   AKS --> ACR

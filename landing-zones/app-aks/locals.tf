@@ -36,7 +36,7 @@ locals {
       name                      = "allow-appgw"
       priority                  = 100
       action                    = "Allow"
-      virtual_network_subnet_id = local.app_gateway_subnet_id
+      ip_address                = var.subnet_cidrs.app_gateway
     }
   }
 
@@ -46,7 +46,7 @@ locals {
       name                      = "allow-apim"
       priority                  = 100
       action                    = "Allow"
-      virtual_network_subnet_id = local.apim_subnet_id
+      ip_address                = var.subnet_cidrs.apim
     }
   }
 
@@ -60,7 +60,7 @@ locals {
   # APIM resource names and URLs.
   apim_name                     = module.naming.api_management.name
   apim_gateway_fqdn             = "${module.naming.api_management.name}.azure-api.net"
-  apim_private_ip               = module.api_management.private_ip_addresses[0]
+  # apim_private_ip               = module.api_management.private_ip_addresses[0]
   apim_private_endpoint_name    = "pep-${module.naming.api_management.name}"
   apim_private_endpoint_nic_name = "nic-${local.apim_private_endpoint_name}"
   apim_backend_url              = "https://${local.app_service_fqdns.backend}"
@@ -76,7 +76,7 @@ locals {
     nsg_logs = substr("${local.storage_account_base}nsg", 0, 24)
   }
   # PostgreSQL admin login name.
-  postgres_admin_login = "pgadminuser"
+  # postgres_admin_login = "pgadminuser"
 
   # AKS private DNS zone name for the selected region.
   aks_private_dns_zone_name = "privatelink.${lower(replace(var.location, " ", ""))}.azmk8s.io"
@@ -102,14 +102,14 @@ locals {
       subresource_names    = ["sites"]
       private_dns_zone     = "privatelink.azurewebsites.net"
     }
-    api_management = {
-      name                 = local.apim_private_endpoint_name
-      network_interface_name = local.apim_private_endpoint_nic_name
-      resource_id          = module.api_management.resource_id
-      service_connection_name = "psc-${local.apim_name}"
-      subresource_names    = ["gateway"]
-      private_dns_zone     = "privatelink.azure-api.net"
-    }
+#    api_management = {
+#      name                   = local.apim_private_endpoint_name
+#      network_interface_name = local.apim_private_endpoint_nic_name
+#      resource_id            = module.api_management.resource_id
+#      service_connection_name = "psc-${local.apim_name}"
+#      subresource_names      = ["gateway"]
+#      private_dns_zone       = "privatelink.azure-api.net"
+#    }
     container_registry = {
       name                   = "pep-${module.naming.container_registry.name}"
       network_interface_name = "nic-pep-${module.naming.container_registry.name}"
@@ -158,14 +158,14 @@ locals {
       subresource_names    = ["blob"]
       private_dns_zone     = "privatelink.blob.core.windows.net"
     }
-    postgresql_server = {
-      name                   = "pep-${module.naming.postgresql_server.name}"
-      network_interface_name = "nic-pep-${module.naming.postgresql_server.name}"
-      resource_id          = module.postgresql_flexible_server.resource_id
-      service_connection_name = "psc-${module.naming.postgresql_server.name}"
-      subresource_names    = ["postgresqlServer"]
-      private_dns_zone     = "privatelink.postgres.database.azure.com"
-    }
+    # postgresql_server = {
+    #   name                   = "pep-${module.naming.postgresql_server.name}"
+    #   network_interface_name = "nic-pep-${module.naming.postgresql_server.name}"
+    #   resource_id          = module.postgresql_flexible_server.resource_id
+    #   service_connection_name = "psc-${module.naming.postgresql_server.name}"
+    #   subresource_names    = ["postgresqlServer"]
+    #   private_dns_zone     = "privatelink.postgres.database.azure.com"
+    # }
   }
 
   # Role assignment definitions (name, scope, role) for consistent iteration.

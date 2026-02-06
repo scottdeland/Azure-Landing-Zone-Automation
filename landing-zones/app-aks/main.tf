@@ -12,15 +12,15 @@ data "azurerm_virtual_network" "ghinfra" {
   resource_group_name = var.ghinfra_resource_group_name
 }
 
-resource "random_password" "postgres_admin" {
-  length           = 24
-  min_lower        = 1
-  min_upper        = 1
-  min_numeric      = 1
-  min_special      = 1
-  override_special = "_%@"
-  special          = true
-}
+# resource "random_password" "postgres_admin" {
+#   length           = 24
+#   min_lower        = 1
+#   min_upper        = 1
+#   min_numeric      = 1
+#   min_special      = 1
+#   override_special = "_%@"
+#   special          = true
+# }
 
 module "resource_group" {
   source  = "Azure/avm-res-resources-resourcegroup/azurerm"
@@ -230,29 +230,32 @@ module "apim_nsg" {
 }
 
 resource "azurerm_resource_group" "network_watcher" {
+  count    = var.enable_nsg_flow_logs ? 1 : 0
   name     = "NetworkWatcherRG"
   location = var.location
   tags     = local.tags
 }
 
 resource "azurerm_network_watcher" "current" {
+  count               = var.enable_nsg_flow_logs ? 1 : 0
   name                = "NetworkWatcher_${lower(replace(var.location, " ", ""))}"
   location            = var.location
-  resource_group_name = azurerm_resource_group.network_watcher.name
+  resource_group_name = azurerm_resource_group.network_watcher[0].name
   tags                = local.tags
 }
 
 module "network_watcher" {
+  count   = var.enable_nsg_flow_logs ? 1 : 0
   source  = "Azure/avm-res-network-networkwatcher/azurerm"
   version = "0.3.2"
 
   enable_telemetry     = false
-  network_watcher_id   = azurerm_network_watcher.current.id
-  network_watcher_name = azurerm_network_watcher.current.name
-  resource_group_name  = azurerm_network_watcher.current.resource_group_name
-  location             = azurerm_network_watcher.current.location
+  network_watcher_id   = azurerm_network_watcher.current[0].id
+  network_watcher_name = azurerm_network_watcher.current[0].name
+  resource_group_name  = azurerm_network_watcher.current[0].resource_group_name
+  location             = azurerm_network_watcher.current[0].location
 
-  flow_logs = var.enable_nsg_flow_logs ? {
+  flow_logs = {
     apim_nsg = {
       name                      = "flow-${local.apim_nsg_name}"
       network_security_group_id = module.apim_nsg.resource_id
@@ -273,7 +276,7 @@ module "network_watcher" {
       }
       target_resource_id = module.apim_nsg.resource_id
     }
-  } : {}
+  }
 }
 
 module "nat_gateway" {
@@ -381,33 +384,33 @@ module "private_dns_zone" {
   domain_name      = each.key
   parent_id        = module.resource_group.resource_id
   tags             = local.tags
-  a_records = each.key == "azure-api.net" ? {
-    apim_gateway = {
-      name         = local.apim_name
-      ttl          = 300
-      ip_addresses = toset([local.apim_private_ip])
-    }
-    apim_management = {
-      name         = "${local.apim_name}.management"
-      ttl          = 300
-      ip_addresses = toset([local.apim_private_ip])
-    }
-    apim_portal = {
-      name         = "${local.apim_name}.portal"
-      ttl          = 300
-      ip_addresses = toset([local.apim_private_ip])
-    }
-    apim_developer = {
-      name         = "${local.apim_name}.developer"
-      ttl          = 300
-      ip_addresses = toset([local.apim_private_ip])
-    }
-    apim_scm = {
-      name         = "${local.apim_name}.scm"
-      ttl          = 300
-      ip_addresses = toset([local.apim_private_ip])
-    }
-  } : {}
+#  a_records = each.key == "azure-api.net" ? {
+#    apim_gateway = {
+#      name         = local.apim_name
+#      ttl          = 300
+#      ip_addresses = toset([local.apim_private_ip])
+#    }
+#    apim_management = {
+#      name         = "${local.apim_name}.management"
+#      ttl          = 300
+#      ip_addresses = toset([local.apim_private_ip])
+#    }
+#    apim_portal = {
+#      name         = "${local.apim_name}.portal"
+#      ttl          = 300
+#      ip_addresses = toset([local.apim_private_ip])
+#    }
+#    apim_developer = {
+#      name         = "${local.apim_name}.developer"
+#      ttl          = 300
+#      ip_addresses = toset([local.apim_private_ip])
+#    }
+#    apim_scm = {
+#      name         = "${local.apim_name}.scm"
+#      ttl          = 300
+#      ip_addresses = toset([local.apim_private_ip])
+#    }
+#  } : {}
 
   virtual_network_links = {
     "vnet-link" = {
@@ -558,7 +561,7 @@ module "web_app_frontend" {
     application_stack = {
       default = {
         current_stack = "node"
-        node_version = "~18"
+        node_version = "~22"
       }
     }
     ip_restriction_default_action     = "Deny"
@@ -613,7 +616,7 @@ module "web_app_backend" {
     application_stack = {
       default = {
         current_stack = "dotnet"
-        dotnet_version = "v8.0"
+        dotnet_version = "v10.0"
       }
     }
     ip_restriction_default_action     = "Deny"
@@ -788,59 +791,60 @@ module "application_gateway" {
   }
 }
 
-module "api_management" {
-  source  = "Azure/avm-res-apimanagement-service/azurerm"
-  version = "0.0.6"
+# module "api_management" {
+#   source  = "Azure/avm-res-apimanagement-service/azurerm"
+#   version = "0.0.6"
+#
+#   enable_telemetry    = false
+#   name                = local.apim_name
+#   location            = var.location
+#   resource_group_name = module.resource_group.name
+#   publisher_name      = var.apim_publisher_name
+#   publisher_email     = var.apim_publisher_email
+#   sku_name            = var.apim_sku_name
+#   tags                = local.tags
+#   diagnostic_settings = local.diagnostic_settings
+#
+#   virtual_network_type = "Internal"
+#   virtual_network_subnet_id = module.virtual_network.subnets[local.subnet_names.apim].resource_id
+#   public_network_access_enabled = true
+# }
+#
+# resource "azurerm_api_management_logger" "appinsights" {
+#   name                = "appinsights"
+#   resource_group_name = module.resource_group.name
+#   api_management_name = local.apim_name
+#   depends_on          = [module.api_management]
+#
+#   application_insights {
+#     instrumentation_key = module.application_insights.instrumentation_key
+#   }
+# }
+#
+# resource "azurerm_api_management_diagnostic" "appinsights" {
+#   identifier                 = "applicationinsights"
+#   resource_group_name        = module.resource_group.name
+#   api_management_name        = local.apim_name
+#   api_management_logger_id   = azurerm_api_management_logger.appinsights.id
+#   always_log_errors          = true
+#   sampling_percentage        = 100
+#   verbosity                  = "information"
+#   http_correlation_protocol  = "W3C"
+# }
+#
+# resource "azurerm_api_management_api" "backend" {
+#   name                = local.apim_backend_api_name
+#   resource_group_name = module.resource_group.name
+#   api_management_name = local.apim_name
+#   revision            = "1"
+#   display_name        = "Backend App Service"
+#   path                = local.apim_backend_api_path
+#   protocols           = ["https"]
+#   service_url         = local.apim_backend_url
+#   subscription_required = false
+#   depends_on = [module.api_management]
+# }
 
-  enable_telemetry    = false
-  name                = local.apim_name
-  location            = var.location
-  resource_group_name = module.resource_group.name
-  publisher_name      = var.apim_publisher_name
-  publisher_email     = var.apim_publisher_email
-  sku_name            = var.apim_sku_name
-  tags                = local.tags
-  diagnostic_settings = local.diagnostic_settings
-
-  virtual_network_type = "Internal"
-  virtual_network_subnet_id = module.virtual_network.subnets[local.subnet_names.apim].resource_id
-  public_network_access_enabled = true
-}
-
-resource "azurerm_api_management_logger" "appinsights" {
-  name                = "appinsights"
-  resource_group_name = module.resource_group.name
-  api_management_name = local.apim_name
-  depends_on          = [module.api_management]
-
-  application_insights {
-    instrumentation_key = module.application_insights.instrumentation_key
-  }
-}
-
-resource "azurerm_api_management_diagnostic" "appinsights" {
-  identifier                 = "applicationinsights"
-  resource_group_name        = module.resource_group.name
-  api_management_name        = local.apim_name
-  api_management_logger_id   = azurerm_api_management_logger.appinsights.id
-  always_log_errors          = true
-  sampling_percentage        = 100
-  verbosity                  = "information"
-  http_correlation_protocol  = "W3C"
-}
-
-resource "azurerm_api_management_api" "backend" {
-  name                = local.apim_backend_api_name
-  resource_group_name = module.resource_group.name
-  api_management_name = local.apim_name
-  revision            = "1"
-  display_name        = "Backend App Service"
-  path                = local.apim_backend_api_path
-  protocols           = ["https"]
-  service_url         = local.apim_backend_url
-  subscription_required = false
-  depends_on = [module.api_management]
-}
 
 module "key_vault" {
   source  = "Azure/avm-res-keyvault-vault/azurerm"
@@ -943,114 +947,115 @@ module "storage_account_app_blob" {
   diagnostic_settings_blob            = local.diagnostic_settings_blob
 }
 
-module "postgresql_flexible_server" {
-  source  = "Azure/avm-res-dbforpostgresql-flexibleserver/azurerm"
-  version = "0.1.4"
-
-  enable_telemetry = false
-  name             = module.naming.postgresql_server.name
-  location         = var.location
-  resource_group_name = module.resource_group.name
-  administrator_login    = local.postgres_admin_login
-  administrator_password = random_password.postgres_admin.result
-  sku_name         = "B_Standard_B1ms"
-  server_version = "15"
-  storage_mb       = 32768
-  backup_retention_days = 7
-  public_network_access_enabled = false
-  tags             = local.tags
-}
-
-resource "azurerm_postgresql_flexible_server_database" "app" {
-  name      = lower(module.naming.postgresql_database.name)
-  server_id = module.postgresql_flexible_server.resource_id
-  charset   = "UTF8"
-  collation = "en_US.utf8"
-}
-
-resource "azurerm_monitor_diagnostic_setting" "postgresql" {
-  name                       = "diag-postgresql"
-  target_resource_id         = module.postgresql_flexible_server.resource_id
-  log_analytics_workspace_id = module.log_analytics_workspace.resource_id
-
-  enabled_log {
-    category = "PostgreSQLLogs"
-  }
-
-  metric {
-    category = "AllMetrics"
-    enabled  = true
-  }
-}
-
-resource "azurerm_monitor_metric_alert" "postgres_cpu" {
-  count               = local.alerts_enabled ? 1 : 0
-  name                = "alert-${module.naming.postgresql_server.name}-cpu"
-  resource_group_name = module.resource_group.name
-  scopes              = [module.postgresql_flexible_server.resource_id]
-  description         = "PostgreSQL CPU > 80% for 5 minutes."
-  severity            = 2
-  frequency           = "PT1M"
-  window_size         = "PT5M"
-
-  criteria {
-    metric_namespace = "Microsoft.DBforPostgreSQL/flexibleServers"
-    metric_name      = "cpu_percent"
-    aggregation      = "Average"
-    operator         = "GreaterThan"
-    threshold        = 80
-  }
-
-  action {
-    action_group_id = azurerm_monitor_action_group.alerts[0].id
-  }
-}
-
-resource "azurerm_monitor_metric_alert" "postgres_memory" {
-  count               = local.alerts_enabled ? 1 : 0
-  name                = "alert-${module.naming.postgresql_server.name}-memory"
-  resource_group_name = module.resource_group.name
-  scopes              = [module.postgresql_flexible_server.resource_id]
-  description         = "PostgreSQL memory > 80% for 5 minutes."
-  severity            = 2
-  frequency           = "PT1M"
-  window_size         = "PT5M"
-
-  criteria {
-    metric_namespace = "Microsoft.DBforPostgreSQL/flexibleServers"
-    metric_name      = "memory_percent"
-    aggregation      = "Average"
-    operator         = "GreaterThan"
-    threshold        = 80
-  }
-
-  action {
-    action_group_id = azurerm_monitor_action_group.alerts[0].id
-  }
-}
-
-resource "azurerm_monitor_metric_alert" "postgres_connections" {
-  count               = local.alerts_enabled ? 1 : 0
-  name                = "alert-${module.naming.postgresql_server.name}-connections"
-  resource_group_name = module.resource_group.name
-  scopes              = [module.postgresql_flexible_server.resource_id]
-  description         = "PostgreSQL active connections > 200 for 5 minutes."
-  severity            = 3
-  frequency           = "PT1M"
-  window_size         = "PT5M"
-
-  criteria {
-    metric_namespace = "Microsoft.DBforPostgreSQL/flexibleServers"
-    metric_name      = "active_connections"
-    aggregation      = "Average"
-    operator         = "GreaterThan"
-    threshold        = 200
-  }
-
-  action {
-    action_group_id = azurerm_monitor_action_group.alerts[0].id
-  }
-}
+# module "postgresql_flexible_server" {
+#   source  = "Azure/avm-res-dbforpostgresql-flexibleserver/azurerm"
+#   version = "0.1.4"
+#
+#   enable_telemetry = false
+#   name             = module.naming.postgresql_server.name
+#   location         = "eastus"
+#   resource_group_name = module.resource_group.name
+#   administrator_login    = local.postgres_admin_login
+#   administrator_password = random_password.postgres_admin.result
+#   sku_name         = "B_Standard_B1ms"
+#   high_availability = null
+#   server_version = "15"
+#   storage_mb       = 32768
+#   backup_retention_days = 7
+#   public_network_access_enabled = false
+#   tags             = local.tags
+# }
+#
+# resource "azurerm_postgresql_flexible_server_database" "app" {
+#   name      = lower(module.naming.postgresql_database.name)
+#   server_id = module.postgresql_flexible_server.resource_id
+#   charset   = "UTF8"
+#   collation = "en_US.utf8"
+# }
+#
+# resource "azurerm_monitor_diagnostic_setting" "postgresql" {
+#   name                       = "diag-postgresql"
+#   target_resource_id         = module.postgresql_flexible_server.resource_id
+#   log_analytics_workspace_id = module.log_analytics_workspace.resource_id
+#
+#   enabled_log {
+#     category = "PostgreSQLLogs"
+#   }
+#
+#   metric {
+#     category = "AllMetrics"
+#     enabled  = true
+#   }
+# }
+#
+# resource "azurerm_monitor_metric_alert" "postgres_cpu" {
+#   count               = local.alerts_enabled ? 1 : 0
+#   name                = "alert-${module.naming.postgresql_server.name}-cpu"
+#   resource_group_name = module.resource_group.name
+#   scopes              = [module.postgresql_flexible_server.resource_id]
+#   description         = "PostgreSQL CPU > 80% for 5 minutes."
+#   severity            = 2
+#   frequency           = "PT1M"
+#   window_size         = "PT5M"
+#
+#   criteria {
+#     metric_namespace = "Microsoft.DBforPostgreSQL/flexibleServers"
+#     metric_name      = "cpu_percent"
+#     aggregation      = "Average"
+#     operator         = "GreaterThan"
+#     threshold        = 80
+#   }
+#
+#   action {
+#     action_group_id = azurerm_monitor_action_group.alerts[0].id
+#   }
+# }
+#
+# resource "azurerm_monitor_metric_alert" "postgres_memory" {
+#   count               = local.alerts_enabled ? 1 : 0
+#   name                = "alert-${module.naming.postgresql_server.name}-memory"
+#   resource_group_name = module.resource_group.name
+#   scopes              = [module.postgresql_flexible_server.resource_id]
+#   description         = "PostgreSQL memory > 80% for 5 minutes."
+#   severity            = 2
+#   frequency           = "PT1M"
+#   window_size         = "PT5M"
+#
+#   criteria {
+#     metric_namespace = "Microsoft.DBforPostgreSQL/flexibleServers"
+#     metric_name      = "memory_percent"
+#     aggregation      = "Average"
+#     operator         = "GreaterThan"
+#     threshold        = 80
+#   }
+#
+#   action {
+#     action_group_id = azurerm_monitor_action_group.alerts[0].id
+#   }
+# }
+#
+# resource "azurerm_monitor_metric_alert" "postgres_connections" {
+#   count               = local.alerts_enabled ? 1 : 0
+#   name                = "alert-${module.naming.postgresql_server.name}-connections"
+#   resource_group_name = module.resource_group.name
+#   scopes              = [module.postgresql_flexible_server.resource_id]
+#   description         = "PostgreSQL active connections > 200 for 5 minutes."
+#   severity            = 3
+#   frequency           = "PT1M"
+#   window_size         = "PT5M"
+#
+#   criteria {
+#     metric_namespace = "Microsoft.DBforPostgreSQL/flexibleServers"
+#     metric_name      = "active_connections"
+#     aggregation      = "Average"
+#     operator         = "GreaterThan"
+#     threshold        = 200
+#   }
+#
+#   action {
+#     action_group_id = azurerm_monitor_action_group.alerts[0].id
+#   }
+# }
 
 module "role_assignments" {
   source  = "Azure/avm-res-authorization-roleassignment/azurerm"
@@ -1058,6 +1063,10 @@ module "role_assignments" {
 
   enable_telemetry = false
   role_assignments_azure_resource_manager = local.role_assignments
+  app_registrations_by_client_id    = {}
+  app_registrations_by_display_name = {}
+  app_registrations_by_object_id    = {}
+  app_registrations_by_principal_id = {}
 
   depends_on = [
     module.container_registry,
