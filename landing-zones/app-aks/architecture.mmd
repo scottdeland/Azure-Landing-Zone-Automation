@@ -1,0 +1,113 @@
+flowchart LR
+  %% App-AKS landing zone architecture (based on landing-zones/app-aks/main.tf)
+
+  subgraph Tenant["Azure AD Tenant"]
+    Sub["Subscription (current)"]
+  end
+
+  Sub --> RG["Resource Group: App-AKS"]
+
+  subgraph RG
+    LA["Log Analytics Workspace"]
+    AI["Application Insights"]
+    AG["Application Gateway (WAF v2)"]
+    PIP["Public IP (App GW)"]
+    NAT["NAT Gateway"]
+    AKS["AKS Private Cluster"]
+    ASP["App Service Plan (Windows)"]
+    FE["Web App Frontend (private)"]
+    BE["Web App Backend (private)"]
+    ACR["Container Registry (private)"]
+    KV["Key Vault (private)"]
+    SB["Service Bus (private)"]
+    REDIS["Redis Cache (private)"]
+    STB["Storage Blob (private)"]
+    STF["Storage File (NFS)"]
+    NSG["APIM Subnet NSG"]
+    APIM["API Management (optional)"]
+    PG["PostgreSQL Flexible Server (optional)"]
+  end
+
+  subgraph VNET["VNet: app-aks"]
+    S_AppGW["Subnet: app_gateway"]
+    S_AKS["Subnet: aks"]
+    S_AppSvc["Subnet: appsvc_integration"]
+    S_PE["Subnet: private_endpoints"]
+    S_APIM["Subnet: apim"]
+  end
+
+  %% Public ingress
+  PIP --> AG
+  AG -->|/| FE
+  AG -->|/api/*| APIM
+  APIM --> BE
+
+  %% Subnet placement
+  S_AppGW --> AG
+  S_AKS --> AKS
+  S_AppSvc --> FE
+  S_AppSvc --> BE
+  S_PE --> ACR
+  S_PE --> KV
+  S_PE --> SB
+  S_PE --> REDIS
+  S_PE --> STB
+  S_PE --> STF
+  S_PE --> FE
+  S_PE --> BE
+  S_PE --> APIM
+  S_PE --> PG
+  S_APIM --> APIM
+  S_APIM --> NSG
+
+  %% Egress
+  NAT --> S_AKS
+
+  %% App/data connectivity
+  AKS -->|pull images| ACR
+  AKS -->|mount NFS| STF
+  FE -->|secrets| KV
+  BE -->|secrets| KV
+  FE -->|blob data| STB
+  BE -->|db| PG
+
+  %% Identity + role assignments
+  MI_AKS["Managed Identity: AKS kubelet"] -.->|AcrPull| ACR
+  MI_AKS -.->|Key Vault Secrets User| KV
+  MI_AKS -.->|Storage File Data Privileged Contributor| STF
+  MI_FE["Managed Identity: Web FE"] -.->|Key Vault Secrets User| KV
+  MI_FE -.->|Storage Blob Data Contributor| STB
+  MI_BE["Managed Identity: Web BE"] -.->|Key Vault Secrets User| KV
+
+  %% Observability
+  LA --> AI
+  AKS -->|logs| LA
+  FE -->|logs| LA
+  BE -->|logs| LA
+  AG -->|logs| LA
+  ACR -->|logs| LA
+  KV -->|logs| LA
+  SB -->|logs| LA
+  REDIS -->|logs| LA
+  STB -->|logs| LA
+  STF -->|logs| LA
+  Sub -->|Activity Log| LA
+
+  %% Private DNS + peering
+  subgraph DNS["Private DNS Zones"]
+    PDNS["privatelink.* zones"]
+    AKSDNS["privatelink.<region>.azmk8s.io"]
+  end
+
+  VNET --- PDNS
+  VNET --- AKSDNS
+  S_PE --- PDNS
+  AKS --- AKSDNS
+
+  GHVNET["GitHub Runners VNet (ghinfra)"]
+  VNET ---|Peering| GHVNET
+  GHVNET --- PDNS
+  GHVNET --- AKSDNS
+
+  classDef optional stroke-dasharray: 5 5,stroke:#777;
+  class APIM,PG optional;
