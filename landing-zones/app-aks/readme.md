@@ -1,32 +1,33 @@
 # App-AKS Landing Zone (App Service + AKS + Private Networking)
 
-This landing zone provisions a private, service-integrated platform in East US that combines:
+This landing zone provisions a private, service-integrated platform in East US 2 (default) that combines:
 
-- AKS for container workloads
-- App Service (frontend + backend) behind App Gateway and API Management
+- AKS for container workloads (private cluster with NAT gateway egress)
+- App Service (frontend + backend) behind Application Gateway (APIM currently disabled in Terraform)
 - Private endpoints + private DNS for all PaaS services
-- Shared platform services (ACR, Key Vault, PostgreSQL, Service Bus, Redis, Storage)
+- Shared platform services (ACR, Key Vault, Service Bus Premium, Redis, Storage; PostgreSQL optional/disabled)
 
 All infrastructure is built with Azure Verified Modules (AVM) and a naming module for consistent naming.
 
 Exceptions (no AVM module available today; kept as azurerm resources):
 - Azure Monitor action group, metric alerts, workbook, and subscription Activity Log diagnostic setting
-- API Management child resources (logger, diagnostic, API definitions)
-- PostgreSQL Flexible Server database (created via azurerm resource)
+- VNet peering resources
+- Network Watcher RG + watcher (only when NSG flow logs are enabled)
 
 ## Architecture summary
 
 Core building blocks:
 
-- Resource group and VNet with five subnets (App Gateway, AKS, App Service integration, private endpoints, APIM)
+- Resource group and VNet with five subnets (App Gateway, AKS, App Service integration, private endpoints, APIM reserved)
+- NAT gateway + public IP attached to the AKS subnet
+- VNet peering to the GitHub runner VNet (`vnet-ghinfra`)
 - App Gateway (WAF v2) with public IP
-- API Management (internal)
 - App Service Plan (Windows) hosting frontend/back web apps
 - AKS private cluster (system-assigned identity)
 - ACR (private)
-- Key Vault, PostgreSQL Flexible Server, Service Bus, Redis, Storage (private)
-- Private DNS zones for every private endpoint + AKS private DNS zone
-- Role assignments for AKS → ACR and App Services → Key Vault
+- Key Vault, Service Bus Premium, Redis, Storage (private endpoints for app blob + AKS NFS; NSG logs storage is public)
+- Private DNS zones for every private endpoint + AKS private DNS zone, linked to both VNets
+- Role assignments for AKS → ACR/Key Vault/Storage and App Services → Key Vault/Blob
 
 ## Dataflow
 
@@ -34,24 +35,22 @@ Core building blocks:
 flowchart LR
   Internet --> AppGateway
   AppGateway -->|/| WebAppFE-PE[Web App FE PE]
-  AppGateway -->|/api/*| APIM-PE[APIM PE]
-  APIM-PE --> APIM
-  APIM --> WebAppBE-PE[Web App BE PE]
+  AppGateway -->|/api/*| WebAppBE-PE[Web App BE PE]
   WebAppFE --> KeyVault
   WebAppBE --> KeyVault
   AKS --> ACR
   AKS --> StorageNFS
   WebAppFE --- PrivateEndpointSubnet
   WebAppBE --- PrivateEndpointSubnet
-  APIM --- PrivateEndpointSubnet
   ACR --- PrivateEndpointSubnet
   KeyVault --- PrivateEndpointSubnet
-  PostgreSQL --- PrivateEndpointSubnet
   ServiceBus --- PrivateEndpointSubnet
   Redis --- PrivateEndpointSubnet
   StorageBlob --- PrivateEndpointSubnet
   PrivateEndpointSubnet --- PrivateDNSZones
 ```
+
+Note: API Management resources are currently commented out. The Application Gateway `/api/*` backend is still configured for the APIM gateway FQDN placeholder in Terraform; update it to the backend web app if APIM remains disabled.
 
 ## DNS + Private endpoint resolution
 
@@ -60,21 +59,17 @@ flowchart LR
   PrivateEndpointSubnet -->|NICs| ACR[ACR PE]
   PrivateEndpointSubnet --> KV[Key Vault PE]
   PrivateEndpointSubnet --> SB[Service Bus PE]
-  PrivateEndpointSubnet --> PostgreSQL[PostgreSQL PE]
   PrivateEndpointSubnet --> REDIS[Redis PE]
   PrivateEndpointSubnet --> StorageBlob[Blob PE]
   PrivateEndpointSubnet --> StorageNFS[File PE]
-  PrivateEndpointSubnet --> APIM[APIM PE]
   PrivateEndpointSubnet --> WebFE[Web App FE PE]
   PrivateEndpointSubnet --> WebBE[Web App BE PE]
   PrivateDNSZones --> ACR
   PrivateDNSZones --> KV
   PrivateDNSZones --> SB
-  PrivateDNSZones --> PostgreSQL
   PrivateDNSZones --> REDIS
   PrivateDNSZones --> StorageBlob
   PrivateDNSZones --> StorageNFS
-  PrivateDNSZones --> APIM
   PrivateDNSZones --> WebFE
   PrivateDNSZones --> WebBE
   AKS -->|VNet integration| PrivateEndpointSubnet
@@ -85,61 +80,68 @@ flowchart LR
 
 Networking:
 
-- VNet and 6 subnets:
+- VNet and 5 subnets:
   - app_gateway
   - aks
   - appsvc_integration (delegated to Microsoft.Web/serverFarms)
   - private_endpoints (private endpoint policies disabled)
-  - apim
-- NSG for APIM subnet (allow App Gateway; deny other VNet HTTP/S)
+  - apim (reserved; APIM module currently disabled)
+- NAT gateway with public IP for AKS egress
+- VNet peering between the landing zone VNet and `vnet-ghinfra`
+- NSG for APIM subnet (allow App Gateway; allow 10.200.0.0/16 for management; deny other VNet HTTP/S)
 
 Ingress + API:
 
 - Application Gateway (WAF_v2, static public IP)
-- API Management (Internal VNet mode, private endpoint)
-- APIM API that routes `/api` to backend App Service
+- API Management resources are currently commented out; `/api` routing is still configured for the APIM gateway FQDN placeholder
 
 Compute:
 
 - App Service Plan (Windows, P1v3)
-- Web App frontend + backend (Windows, private access only)
+- Web App frontend + backend (Windows, private access only; frontend Node 22, backend .NET 10)
 - AKS private cluster (system-assigned identity)
 
 Data + integration:
 
 - Azure Container Registry (private)
 - Key Vault (private, RBAC)
-- Service Bus (Standard)
+- Service Bus (Premium, capacity 1)
 - Redis Cache (Standard, note: zones require Premium)
-- PostgreSQL Flexible Server (private access via private endpoint)
-- Storage (Premium FileStorage for NFS; Standard StorageV2 for blobs)
+- PostgreSQL Flexible Server (currently commented out)
+- Storage:
+  - Premium FileStorage for AKS NFS (public network access enabled + private endpoint)
+  - Standard StorageV2 for app blobs (private)
+  - Standard StorageV2 for NSG flow logs (public; created only when flow logs enabled)
 
 Private connectivity:
 
-- Private endpoints for ACR, KV, Service Bus, Redis, PostgreSQL, storage (file/blob), APIM (gateway), frontend web app, backend web app
-- Private DNS zone `azure-api.net` with A records for APIM gateway/management endpoints (for internal VNet control plane access)
-- Private DNS zones and VNet links for all private endpoints + AKS private DNS zone
+- Private endpoints for ACR, KV, Service Bus, Redis, storage (file/blob), frontend web app, backend web app
+- Private DNS zones (from `private_dns_zones`) and VNet links for all private endpoints + AKS private DNS zone
+- `privatelink.azure-api.net` and `privatelink.postgres.database.azure.com` zones are created, but APIM/PostgreSQL endpoints are currently disabled
 
 Identity & access:
 
 - Role assignment: AKS kubelet identity → ACR (AcrPull)
+- Role assignment: AKS kubelet identity → Key Vault (Key Vault Secrets User)
+- Role assignment: AKS kubelet identity → Storage File Data Privileged Contributor (AKS NFS)
 - Role assignment: Web App identities → Key Vault (Key Vault Secrets User)
+- Role assignment: Web App frontend → Storage Blob Data Contributor
 
 ## Observability (logging + diagnostics)
 
 - Log Analytics workspace dedicated to the landing zone (PerGB2018, 30-day retention).
 - Application Insights enabled for both web apps (frontend + backend), linked to the workspace.
-- Application Insights logger for API Management (gateway diagnostics).
+- Application Insights logger for API Management (gateway diagnostics) when APIM is enabled.
 - AKS OMS agent enabled to send cluster logs/metrics to the workspace.
 - Subscription Activity Log streamed to Log Analytics.
-- NSG flow logs (Traffic Analytics) optional for the APIM NSG (disabled by default).
+- NSG flow logs (Traffic Analytics) optional for the APIM NSG (disabled by default; deploys Network Watcher + storage account when enabled).
 - App Service HTTP/application logs enabled (file system with 7-day retention).
-- Azure Monitor action group + metric alerts (App Service Plan CPU, Web App HTTP 5xx).
+- Azure Monitor action group + metric alerts (App Service Plan CPU, Web App HTTP 5xx) when `alert_email_receivers` is set.
 - App-AKS overview workbook deployed in Azure Monitor.
 - Diagnostic settings stream logs/metrics to Log Analytics for:
   - VNet, AKS, ACR, App Gateway (and its public IP)
-  - API Management, Key Vault, Service Bus, Redis
-  - PostgreSQL Flexible Server
+  - Key Vault, Service Bus, Redis
+  - API Management and PostgreSQL Flexible Server when enabled
   - Storage accounts (account-level metrics plus Blob/File service logs)
 
 ## Inputs and outputs
@@ -151,6 +153,8 @@ Key inputs:
 - `location`, `location_short`
 - `vnet_cidr` and `subnet_cidrs`
 - `apim_publisher_name`, `apim_publisher_email`, `apim_sku_name`
+- `alert_email_receivers`, `enable_nsg_flow_logs`
+- `ghinfra_vnet_name`, `ghinfra_resource_group_name`
 - `tags`
 
 Outputs (`landing-zones/app-aks/outputs.tf`):
@@ -259,6 +263,19 @@ Everything else is billed per-instance or per-usage. Use the Retail Prices API f
 - PremiumV3 quota is required for the App Service Plan (P1v3).
 - Redis zones require Premium; set `zones = null` (or switch to Premium) if using Standard.
 - PostgreSQL Flexible Server provisioning can be restricted by region/tenant; pick another region or request an exception if blocked.
+- NSG flow logs may be blocked for new deployments (policy changes noted in the variable description).
+
+## Changes since 2026-02-03
+
+- Default region changed to East US 2 (`EastUS2`).
+- API Management module and related resources are commented out; the APIM private endpoint and `azure-api.net` A-records are not created.
+- PostgreSQL Flexible Server module and private endpoint are commented out; the private DNS zone remains in `private_dns_zones`.
+- Added NAT gateway (with public IP) for AKS subnet egress.
+- Added VNet peering to the GitHub runner VNet (`vnet-ghinfra`) and a management allow rule in the APIM NSG for `10.200.0.0/16`.
+- Service Bus SKU set to Premium (capacity 1).
+- Added storage accounts for AKS NFS, app blobs, and NSG flow logs (flow logs storage is conditional).
+- Added private endpoints for AKS NFS file and app blob storage.
+- Expanded role assignments to include AKS → Key Vault/Storage and Web App frontend → Storage Blob.
 
 ## Files to know
 
